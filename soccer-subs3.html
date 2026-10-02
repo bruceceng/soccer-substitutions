@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Soccer Lineup Optimizer - GA Test Bench</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 20px; background: #f4f6f8; color: #333; }
+    h1, h2 { color: #1e293b; }
+    .grid { display: grid; grid-template-columns: 320px 1fr; gap: 20px; }
+    .card { background: #fff; padding: 18px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 20px; }
+    label { display: block; font-weight: 600; margin-top: 10px; font-size: 0.85rem; }
+    input, select, button { width: 100%; padding: 8px; margin-top: 4px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+    button { background: #2563eb; color: white; font-weight: bold; border: none; cursor: pointer; margin-top: 15px; }
+    button:hover { background: #1d4ed8; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.85rem; }
+    th, td { border: 1px solid #e2e8f0; padding: 6px 8px; text-align: center; }
+    th { background: #f1f5f9; font-weight: 600; }
+    .past-minutes-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    .metrics { font-family: monospace; background: #0f172a; color: #38bdf8; padding: 12px; border-radius: 6px; font-size: 0.9rem; }
+    .pin-row { display: flex; gap: 4px; margin-top: 6px; }
+    .pin-row select { width: auto; flex: 1; }
+  </style>
+</head>
+<body>
+
+  <h1>Soccer Lineup GA Optimizer Test Bench</h1>
+
+  <div class="grid">
+    <!-- LEFT COLUMN: CONTROLS & CONSTRAINTS -->
+    <div>
+      <div class="card">
+        <h2>Game Context</h2>
+        <label>Optimize Quarters:</label>
+        <select id="remainingQuarters">
+          <option value="1,2,3,4">Full Game (Q1 - Q4)</option>
+          <option value="3,4" selected>Halftime Re-plan (Q3 - Q4)</option>
+          <option value="4">Q4 Only</option>
+        </select>
+
+        <label>Max Subs Per Quarter:</label>
+        <select id="maxSwaps">
+          <option value="1" selected>1 Sub (Max 6m delta)</option>
+          <option value="0">0 Subs (Strict 12m blocks)</option>
+        </select>
+      </div>
+
+      <div class="card">
+        <h2>Past Accrued Minutes</h2>
+        <div class="past-minutes-grid" id="pastMinutesInputs"></div>
+      </div>
+
+      <div class="card">
+        <h2>Position Pins (Hard Mask)</h2>
+        <div id="pinsList"></div>
+        <button type="button" id="addPinBtn" style="background:#64748b; font-size: 0.8rem;">+ Add Pin</button>
+      </div>
+
+      <button id="runBtn" style="font-size: 1rem; padding: 12px;">Run Optimization</button>
+    </div>
+
+    <!-- RIGHT COLUMN: RESULTS & SCHEDULE -->
+    <div>
+      <div class="card">
+        <h2>Execution Metrics</h2>
+        <div class="metrics" id="metricsOutput">Ready to run...</div>
+      </div>
+
+      <div class="card">
+        <h2>Optimized Schedule</h2>
+        <div id="scheduleTableContainer"></div>
+      </div>
+
+      <div class="card">
+        <h2>Player Minutes Summary</h2>
+        <div id="minutesTableContainer"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

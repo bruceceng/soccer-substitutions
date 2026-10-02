@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>U8 Soccer Lineup Optimization Test Bench</title>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; margin: 24px; background: #f8fafc; color: #0f172a; }
+    .container { max-width: 840px; margin: 0 auto; }
+    .card { background: white; padding: 24px; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    
+    .param-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+      gap: 12px;
+      margin-bottom: 20px;
+      background: #f1f5f9;
+      padding: 16px;
+      border-radius: 6px;
+      border: 1px solid #cbd5e1;
+    }
+    .param-field { display: flex; flex-direction: column; gap: 4px; }
+    .param-field label { font-size: 12px; font-weight: 600; color: #475569; }
+    .param-field input { padding: 6px 10px; border: 1px solid #cbd5e1; border-radius: 4px; font-weight: 600; font-size: 14px; }
+
+    .btn-group { display: flex; gap: 8px; align-items: center; margin-top: 16px; flex-wrap: wrap; }
+    button { background: #2563eb; color: white; border: none; padding: 10px 16px; border-radius: 6px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+    button:hover { background: #1d4ed8; }
+    button.secondary { background: #475569; }
+    button.secondary:hover { background: #334155; }
+    #fitnessChart { width: 100%; height: 320px; border: 1px solid #e2e8f0; border-radius: 6px; }
+    pre { background: #0f172a; color: #f8fafc; padding: 14px; border-radius: 6px; overflow-x: auto; font-size: 13px; margin-top: 16px; }
+    .status { font-weight: 600; color: #1e293b; margin-top: 12px; }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <div class="card">
+      <h2>U8 GA Lineup Optimization Test Bench</h2>
+      
+      <!-- Meta Parameters Tuning Panel -->
+      <div class="param-grid">
+        <div class="param-field">
+          <label for="metaPopSize">Population Size</label>
+          <input type="number" id="metaPopSize" value="150" min="20" max="1000" step="10">
+        </div>
+        <div class="param-field">
+          <label for="metaMutationRate">Mutation Rate (0 - 1.0)</label>
+          <input type="number" id="metaMutationRate" value="0.35" min="0" max="1" step="0.05">
+        </div>
+        <div class="param-field">
+          <label for="metaElitismRate">Elitism Rate (0 - 0.5)</label>
+          <input type="number" id="metaElitismRate" value="0.15" min="0" max="0.5" step="0.05">
+        </div>
+        <div class="param-field">
+          <label for="metaImmigrantRate">Random Immigrants Rate</label>
+          <input type="number" id="metaImmigrantRate" value="0.10" min="0" max="0.5" step="0.05">
+        </div>
+        <div class="param-field">
+          <label for="metaStagnation">Stagnation Epoch Threshold</label>
+          <input type="number" id="metaStagnation" value="35" min="5" max="200" step="5">
+        </div>
+        <div class="param-field">
+          <label for="metaLocalSearch">Local Search Polish Depth</label>
+          <input type="number" id="metaLocalSearch" value="8" min="0" max="50" step="1">
+        </div>
+      </div>
+
+      <div id="fitnessChart"></div>
+
+      <div class="btn-group">
+        <button id="btnInit">Start New Optimization</button>
+        <button id="btnStep" class="secondary">Run +500ms</button>
+        <button id="btnAuto" class="secondary">Auto Run (Continuous)</button>
+      </div>
+
+      <p id="status" class="status">Click "Start New Optimization" to run initial GA cycle.</p>
+      <pre id="output">// Optimization schedule results will display here...</pre>
+    </div>
+  </div>
+
+  <script src="gaWorker.js"></script>
+  <script src="app.js"></script>
+
+</body>
+</html>

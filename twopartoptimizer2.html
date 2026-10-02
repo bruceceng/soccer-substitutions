@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Portland Timbers U8 - Macro Pipeline Payload</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 font-sans min-h-screen p-6">
+    <div class="max-w-6xl mx-auto space-y-6">
+        
+        <!-- Header -->
+        <header class="border-b border-slate-800 pb-4 flex justify-between items-center">
+            <div>
+                <h1 class="text-2xl font-bold text-emerald-400">Portland Timbers U8</h1>
+                <p class="text-sm text-slate-400">Macro-Allocation: Pipeline Payload Generation</p>
+            </div>
+        </header>
+
+        <!-- Game Config Card -->
+        <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 shadow-lg grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+            <div>
+                <label class="block text-sm font-medium text-slate-300 mb-1">Remaining Game Time (Mins)</label>
+                <input type="number" id="remaining-time" value="48" step="1" min="1" max="48" 
+                    class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-emerald-500 font-bold"
+                    oninput="recalculateAll()">
+            </div>
+            <div class="text-xs text-slate-400 bg-slate-900 p-3 rounded-lg border border-slate-700">
+                <span class="font-semibold text-emerald-400">Payload Structure:</span> Encapsulates player roster states, position histories, validated constraints, dropped conflict logs, and remaining time chunks into a single clean JSON payload.
+            </div>
+        </div>
+
+        <!-- Roster Table -->
+        <div class="bg-slate-800 rounded-xl border border-slate-700 shadow-lg overflow-hidden">
+            <div class="p-4 border-b border-slate-700 flex justify-between items-center">
+                <h2 class="font-semibold text-lg text-white">Roster, Position History & Field Status</h2>
+                <button onclick="resetPriorMinutes()" class="text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 px-3 py-1.5 rounded transition">
+                    Reset Prior Mins
+                </button>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="bg-slate-900/50 text-slate-400 text-xs uppercase tracking-wider border-b border-slate-700">
+                            <th class="p-3">Player</th>
+                            <th class="p-3">Goalie Pref</th>
+                            <th class="p-3 text-center">Prior G</th>
+                            <th class="p-3 text-center">Prior D</th>
+                            <th class="p-3 text-center">Prior M</th>
+                            <th class="p-3 text-center">Prior F</th>
+                            <th class="p-3">Current Field Position</th>
+                        </tr>
+                    </thead>
+                    <tbody id="roster-table-body" class="divide-y divide-slate-700/50 text-sm">
+                        <!-- Populated by JS -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Manual Constraints Manager -->
+        <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 shadow-lg space-y-4">
+            <div class="flex justify-between items-center">
+                <div>
+                    <h2 class="font-semibold text-lg text-white">Manual Player Constraints</h2>
+                    <p class="text-xs text-slate-400">Force a player into a specific position for a specific time chunk.</p>
+                </div>
+                <button onclick="addManualConstraintRow()" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium px-3 py-2 rounded-lg transition shadow">
+                    + Add Constraint
+                </button>
+            </div>
+            <div id="manual-constraints-list" class="space-y-2">
+                <!-- Populated by JS -->
+            </div>
+        </div>
+
+        <!-- Results Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            
+            <!-- Remaining Chunks Display -->
+            <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 shadow-lg flex flex-col">
+                <h2 class="font-semibold text-lg text-white mb-3">Remaining Time Chunks</h2>
+                <div id="chunks-container" class="space-y-2 flex-grow overflow-y-auto max-h-72 pr-1">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+
+            <!-- Complete Pipeline JSON Payload Output -->
+            <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 shadow-lg flex flex-col">
+                <div class="flex justify-between items-center mb-3">
+                    <h2 class="font-semibold text-lg text-white">Pipeline JSON Payload</h2>
+                    <span id="error-badge" class="text-xs px-2 py-0.5 rounded bg-slate-700 text-slate-300">0 Errors Logged</span>
+                </div>
+                <div class="text-xs text-slate-400 mb-2">Complete state ready for the downstream macro-allocation engine:</div>
+                <pre id="json-output-container" class="bg-slate-900 border border-slate-700 p-3 rounded-lg text-xs text-emerald-300 font-mono flex-grow overflow-y-auto max-h-60">
+                    <!-- Populated by JS -->
+                </pre>
+            </div>
+
+        </div>
+
+    </div>
+
+    <script>
+        const timbresRoster = [
+            { id: 'Jesse', name: 'Jesse', goaliePref: 'preferred' },
+            { id: 'Ellis', name: 'Ellis', goaliePref: 'preferred' },
+            { id: 'Bennet', name: 'Bennet', goaliePref: 'preferred' },
+            { id: 'Diego', name: 'Diego', goaliePref: 'preferred' },
+            { id: 'London', name: 'London', goaliePref: 'refuses' },
+            { id: 'Kyton', name: 'Kyton', goaliePref: 'preferred' },
+            { id: 'Vivian', name: 'Vivian', goaliePref: 'refuses' },
+            { id: 'Isabelle', name: 'Isabelle', goaliePref: 'refuses' },
+            { id: 'Olivia', name: 'Olivia', goaliePref: 'refuses' },
+            { id: 'Elena', name: 'Elena', goaliePref: 'refuses' }
+        ];
+
+        let playerStates = timbresRoster.map(p => ({
+            ...p,
+            prior: { G: 0, D: 0, M: 0, F: 0 },
+            currentPosition: 'bench' // 'bench', 'G', 'D_l', 'D_r', 'M_l', 'M_r', 'F'
+        }));
+
+        let manualConstraints = [];
+
+        function renderRoster() {
+            const tbody = document.getElementById('roster-table-body');
+            tbody.innerHTML = '';
+
+            playerStates.forEach((player, index) => {
+                const row = document.createElement('tr');
+                row.className = 'hover:bg-slate-700/30 transition';
+                
+                let prefBadge = player.goaliePref === 'preferred' 
+                    ? '<span class="px-2 py-0.5 text-xs bg-emerald-900/60 text-emerald-300 rounded border border-emerald-700">Willing/Pref</span>'
+                    : '<span class="px-2 py-0.5 text-xs bg-rose-900/60 text-rose-300 rounded border border-rose-700">Refuses GK</span>';
+
+                row.innerHTML = `
+                    <td class="p-3 font-medium text-white">${player.name}</td>
+                    <td class="p-3">${prefBadge}</td>
+                    <td class="p-3 text-center">
+                        <input type="number" value="${player.prior.G}" min="0" max="60" step="1"
+                            onchange="updatePrior(${index}, 'G', this.value)"
+                            class="w-16 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-center text-white focus:outline-none focus:border-emerald-500">
+                    </td>
+                    <td class="p-3 text-center">
+                        <input type="number" value="${player.prior.D}" min="0" max="60" step="1"
+                            onchange="updatePrior(${index}, 'D', this.value)"
+                            class="w-16 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-center text-white focus:outline-none focus:border-emerald-500">
+                    </td>
+                    <td class="p-3 text-center">
+                        <input type="number" value="${player.prior.M}" min="0" max="60" step="1"
+                            onchange="updatePrior(${index}, 'M', this.value)"
+                            class="w-16 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-center text-white focus:outline-none focus:border-emerald-500">
+                    </td>
+                    <td class="p-3 text-center">
+                        <input type="number" value="${player.prior.F}" min="0" max="60" step="1"
+                            onchange="updatePrior(${index}, 'F', this.value)"
+                            class="w-16 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-center text-white focus:outline-none focus:border-emerald-500">
+                    </td>
+                    <td class="p-3">
+                        <select onchange="updatePosition(${index}, this.value)"
+                            class="bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-white focus:outline-none focus:border-emerald-500 text-xs">
+                            <option value="bench" ${player.currentPosition === 'bench' ? 'selected' : ''}>On Bench</option>
+                            <option value="G" ${player.currentPosition === 'G' ? 'selected' : ''}>G (Goalie)</option>
+                            <option value="D_l" ${player.currentPosition === 'D_l' ? 'selected' : ''}>D_l (Left Defender)</option>
+                            <option value="D_r" ${player.currentPosition === 'D_r' ? 'selected' : ''}>D_r (Right Defender)</option>
+                            <option value="M_l" ${player.currentPosition === 'M_l' ? 'selected' : ''}>M_l (Left Midfielder)</option>
+                            <option value="M_r" ${player.currentPosition === 'M_r' ? 'selected' : ''}>M_r (Right Midfielder)</option>
+                            <option value="F" ${player.currentPosition === 'F' ? 'selected' : ''}>F (Forward)</option>
+                        </select>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        function updatePrior(index, category, value) {
+            playerStates[index].prior[category] = parseInt(value) || 0;
+            recalculateAll();
+        }
+
+        function updatePosition(index, value) {
+            playerStates[index].currentPosition = value;
+            recalculateAll();
+        }
+
+        function resetPriorMinutes() {
+            playerStates.forEach(p => p.prior = { G: 0, D: 0, M: 0, F: 0 });
+            renderRoster();
+            recalculateAll();
+        }
+
+        function addManualConstraintRow() {
+            manualConstraints.push({ playerId: timbresRoster[0].id, chunkId: 'Q3-1', position: 'G' });
+            renderManualConstraints();
+            recalculateAll();
+        }
+
+        function removeManualConstraintRow(index) {
+            manualConstraints.splice(index, 1);
+            renderManualConstraints();
+            recalculateAll();
+        }
+
+        function updateManualConstraint(index, field, value) {
+            manualConstraints[index][field] = value;
+            recalculateAll();
+        }
+
+        function renderManualConstraints() {
+            const container = document.getElementById('manual-constraints-list');
+            container.innerHTML = '';
+
+            if (manualConstraints.length === 0) {
+                container.innerHTML = '<div class="text-xs text-slate-500 italic">No manual constraints added yet. Click "+ Add Constraint" to force specific player-quarter positions.</div>';
+                return;
+            }
+
+            const currentChunks = generateRemainingChunks(parseInt(document.getElementById('remaining-time').value) || 48);
+
+            manualConstraints.forEach((c, index) => {
+                const row = document.createElement('div');
+                row.className = 'flex items-center gap-3 bg-slate-900 p-2.5 rounded-lg border border-slate-700 text-sm';
+                
+                let playerSelect = `<select onchange="updateManualConstraint(${index}, 'playerId', this.value)" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-white text-xs">`;
+                timbresRoster.forEach(p => {
+                    playerSelect += `<option value="${p.id}" ${p.id === c.playerId ? 'selected' : ''}>${p.name}</option>`;
+                });
+                playerSelect += `</select>`;
+
+                let chunkSelect = `<select onchange="updateManualConstraint(${index}, 'chunkId', this.value)" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-white text-xs">`;
+                currentChunks.forEach(ch => {
+                    chunkSelect += `<option value="${ch.id}" ${ch.id === ch.id ? 'selected' : ''}>${ch.id}</option>`;
+                });
+                chunkSelect += `</select>`;
+
+                let posSelect = `<select onchange="updateManualConstraint(${index}, 'position', this.value)" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-white text-xs">
+                    <option value="G" ${c.position === 'G' ? 'selected' : ''}>G</option>
+                    <option value="D_l" ${c.position === 'D_l' ? 'selected' : ''}>D_l</option>
+                    <option value="D_r" ${c.position === 'D_r' ? 'selected' : ''}>D_r</option>
+                    <option value="M_l" ${c.position === 'M_l' ? 'selected' : ''}>M_l</option>
+                    <option value="M_r" ${c.position === 'M_r' ? 'selected' : ''}>M_r</option>
+                    <option value="F" ${c.position === 'F' ? 'selected' : ''}>F</option>
+                </select>`;
+
+                row.innerHTML = `
+                    <div class="flex-grow flex items-center gap-2 flex-wrap">
+                        <span class="text-xs text-slate-400">Player:</span> ${playerSelect}
+                        <span class="text-xs text-slate-400 ml-2">Chunk:</span> ${chunkSelect}
+                        <span class="text-xs text-slate-400 ml-2">Pos:</span> ${posSelect}
+                    </div>
+                    <button onclick="removeManualConstraintRow(${index})" class="text-xs text-rose-400 hover:text-rose-300 px-2 py-1">✕</button>
+                `;
+                container.appendChild(row);
+            });
+        }
+
+        function generateRemainingChunks(remainingTimeTotal, totalGameTime = 48) {
+            const standardChunks = [
+                { id: 'Q1-1', quarter: 1, duration: 6 },
+                { id: 'Q1-2', quarter: 1, duration: 6 },
+                { id: 'Q2-1', quarter: 2, duration: 6 },
+                { id: 'Q2-2', quarter: 2, duration: 6 },
+                { id: 'Q3-1', quarter: 3, duration: 6 },
+                { id: 'Q3-2', quarter: 3, duration: 6 },
+                { id: 'Q4-1', quarter: 4, duration: 6 },
+                { id: 'Q4-2', quarter: 4, duration: 6 }
+            ];
+
+            const elapsedTotal = totalGameTime - remainingTimeTotal;
+            let accumulatedTime = 0;
+            const activeChunks = [];
+
+            for (let chunk of standardChunks) {
+                const chunkStart = accumulatedTime;
+                const chunkEnd = accumulatedTime + chunk.duration;
+
+                if (elapsedTotal < chunkEnd) {
+                    if (elapsedTotal > chunkStart) {
+                        const remainingDuration = chunkEnd - elapsedTotal;
+                        activeChunks.push({
+                            ...chunk,
+                            duration: remainingDuration,
+                            isPartial: true
+                        });
+                    } else {
+                        activeChunks.push({
+                            ...chunk,
+                            isPartial: false
+                        });
+                    }
+                }
+                accumulatedTime = chunkEnd;
+            }
+
+            return activeChunks;
+        }
+
+        function buildPipelinePayload() {
+            const remainingTimeTotal = parseInt(document.getElementById('remaining-time').value) || 48;
+            const chunks = generateRemainingChunks(remainingTimeTotal);
+            
+            let constraints = [];
+            let errors = [];
+            let constraintMap = {}; // Key: `${chunkId}_${position}`
+
+            if (chunks.length > 0) {
+                const currentChunkId = chunks[0].id;
+
+                // 1. Process active current chunk field status as top-priority constraints
+                playerStates.forEach(player => {
+                    if (player.currentPosition !== 'bench') {
+                        const key = `${currentChunkId}_${player.currentPosition}`;
+                        if (!constraintMap[key]) {
+                            constraintMap[key] = { playerId: player.id, position: player.currentPosition, chunkId: currentChunkId, source: 'live_field' };
+                            constraints.push(constraintMap[key]);
+                        } else {
+                            errors.push({
+                                type: 'CONFLICT_DROPPED',
+                                message: `Live field position conflict: Position ${player.currentPosition} in chunk ${currentChunkId} already filled. Constraint for ${player.id} dropped.`
+                            });
+                        }
+                    }
+                });
+            }
+
+            // 2. Process manual constraints sequentially
+            manualConstraints.forEach(mc => {
+                const key = `${mc.chunkId}_${mc.position}`;
+                
+                let playerAlreadyAssignedInChunk = constraints.some(c => c.chunkId === mc.chunkId && c.playerId === mc.playerId);
+
+                if (!constraintMap[key] && !playerAlreadyAssignedInChunk) {
+                    constraintMap[key] = { playerId: mc.playerId, position: mc.position, chunkId: mc.chunkId, source: 'manual' };
+                    constraints.push(constraintMap[key]);
+                } else {
+                    errors.push({
+                        type: 'CONFLICT_DROPPED',
+                        message: `Manual constraint conflict: Position ${mc.position} in chunk ${mc.chunkId} already occupied or player already assigned. Constraint for ${mc.playerId} dropped.`
+                    });
+                }
+            });
+
+            // Construct full payload object
+            const payload = {
+                metadata: {
+                    remainingTimeTotal,
+                    generatedAt: new Date().toISOString()
+                },
+                roster: playerStates.map(p => ({
+                    id: p.id,
+                    name: p.name,
+                    goaliePref: p.goaliePref,
+                    priorMinutes: { ...p.prior },
+                    currentPosition: p.currentPosition
+                })),
+                remainingChunks: chunks.map(ch => ({
+                    id: ch.id,
+                    quarter: ch.quarter,
+                    duration: ch.duration,
+                    isPartial: !!ch.isPartial
+                })),
+                constraints: constraints,
+                errors: errors
+            };
+
+            return payload;
+        }
+
+        function renderChunks(chunks) {
+            const container = document.getElementById('chunks-container');
+            container.innerHTML = '';
+
+            if (chunks.length === 0) {
+                container.innerHTML = '<div class="text-sm text-slate-500 italic">No remaining time chunks. Game complete.</div>';
+                return;
+            }
+
+            chunks.forEach(chunk => {
+                const div = document.createElement('div');
+                div.className = `p-3 rounded-lg border flex justify-between items-center ${chunk.isPartial ? 'bg-amber-950/30 border-amber-600/50' : 'bg-slate-900 border-slate-700'}`;
+                div.innerHTML = `
+                    <div>
+                        <span class="font-bold text-white">${chunk.id}</span>
+                        <span class="text-xs text-slate-400 ml-2">Quarter ${chunk.quarter}</span>
+                        ${chunk.isPartial ? '<span class="ml-2 px-1.5 py-0.5 text-[10px] bg-amber-900/60 text-amber-300 rounded border border-amber-700">Active Partial</span>' : ''}
+                    </div>
+                    <div class="text-emerald-400 font-bold">${chunk.duration} min</div>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        function recalculateAll() {
+            const remainingTime = parseInt(document.getElementById('remaining-time').value) || 48;
+            const chunks = generateRemainingChunks(remainingTime);
+            
+            renderChunks(chunks);
+
+            const payload = buildPipelinePayload();
+            
+            const badge = document.getElementById('error-badge');
+            badge.innerText = `${payload.errors.length} Error${payload.errors.length === 1 ? '' : 's'} Logged`;
+            badge.className = `text-xs px-2 py-0.5 rounded ${payload.errors.length > 0 ? 'bg-amber-900/60 text-amber-300 border border-amber-700' : 'bg-slate-700 text-slate-300'}`;
+
+            document.getElementById('json-output-container').innerText = JSON.stringify(payload, null, 2);
+        }
+
+        // Initial render
+        renderRoster();
+        renderManualConstraints();
+        recalculateAll();
+    </script>
+</body>
+</html>

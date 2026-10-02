@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Portland Timbers U8 - Position-Aware Chunks & Constraints</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 font-sans min-h-screen p-6">
+    <div class="max-w-5xl mx-auto space-y-6">
+        
+        <!-- Header -->
+        <header class="border-b border-slate-800 pb-4 flex justify-between items-center">
+            <div>
+                <h1 class="text-2xl font-bold text-emerald-400">Portland Timbers U8</h1>
+                <p class="text-sm text-slate-400">Macro-Allocation: Position Mapping & Constraints</p>
+            </div>
+        </header>
+
+        <!-- Game Config Card -->
+        <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 shadow-lg grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+            <div>
+                <label class="block text-sm font-medium text-slate-300 mb-1">Remaining Game Time (Mins)</label>
+                <input type="number" id="remaining-time" value="48" step="1" min="1" max="48" 
+                    class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-emerald-500 font-bold"
+                    oninput="recalculateAll()">
+            </div>
+            <div class="text-xs text-slate-400 bg-slate-900 p-3 rounded-lg border border-slate-700">
+                <span class="font-semibold text-emerald-400">Active Formation Slots:</span> G, D_l, D_r, M_l, M_r, F. Each position can only be filled by one player per chunk.
+            </div>
+        </div>
+
+        <!-- Roster Table -->
+        <div class="bg-slate-800 rounded-xl border border-slate-700 shadow-lg overflow-hidden">
+            <div class="p-4 border-b border-slate-700 flex justify-between items-center">
+                <h2 class="font-semibold text-lg text-white">Live Field Status & Exact Positions</h2>
+                <span class="text-xs text-slate-400">Assign current positions for active partial chunk</span>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="bg-slate-900/50 text-slate-400 text-xs uppercase tracking-wider border-b border-slate-700">
+                            <th class="p-3">Player</th>
+                            <th class="p-3">Goalie Preference</th>
+                            <th class="p-3">Current Field Position</th>
+                        </tr>
+                    </thead>
+                    <tbody id="roster-table-body" class="divide-y divide-slate-700/50 text-sm">
+                        <!-- Populated by JS -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Results Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            
+            <!-- Remaining Chunks Display -->
+            <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 shadow-lg flex flex-col">
+                <h2 class="font-semibold text-lg text-white mb-3">Remaining Time Chunks</h2>
+                <div id="chunks-container" class="space-y-2 flex-grow overflow-y-auto max-h-72 pr-1">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+
+            <!-- Extracted Constraints Display -->
+            <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 shadow-lg flex flex-col">
+                <h2 class="font-semibold text-lg text-white mb-3">Extracted Position Constraints</h2>
+                <div class="text-xs text-slate-400 mb-2">Locked roles for the active current chunk:</div>
+                <div id="constraints-container" class="space-y-2 flex-grow overflow-y-auto max-h-72 pr-1">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+
+        </div>
+
+    </div>
+
+    <script>
+        const timbresRoster = [
+            { id: 'Jesse', name: 'Jesse', goaliePref: 'preferred' },
+            { id: 'Ellis', name: 'Ellis', goaliePref: 'preferred' },
+            { id: 'Bennet', name: 'Bennet', goaliePref: 'preferred' },
+            { id: 'Diego', name: 'Diego', goaliePref: 'preferred' },
+            { id: 'London', name: 'London', goaliePref: 'refuses' },
+            { id: 'Kyton', name: 'Kyton', goaliePref: 'preferred' },
+            { id: 'Vivian', name: 'Vivian', goaliePref: 'refuses' },
+            { id: 'Isabelle', name: 'Isabelle', goaliePref: 'refuses' },
+            { id: 'Olivia', name: 'Olivia', goaliePref: 'refuses' },
+            { id: 'Elena', name: 'Elena', goaliePref: 'refuses' }
+        ];
+
+        let playerStates = timbresRoster.map(p => ({
+            ...p,
+            currentPosition: 'bench' // 'bench', 'G', 'D_l', 'D_r', 'M_l', 'M_r', 'F'
+        }));
+
+        function renderRoster() {
+            const tbody = document.getElementById('roster-table-body');
+            tbody.innerHTML = '';
+
+            playerStates.forEach((player, index) => {
+                const row = document.createElement('tr');
+                row.className = 'hover:bg-slate-700/30 transition';
+                
+                let prefBadge = player.goaliePref === 'preferred' 
+                    ? '<span class="px-2 py-0.5 text-xs bg-emerald-900/60 text-emerald-300 rounded border border-emerald-700">Willing/Pref</span>'
+                    : '<span class="px-2 py-0.5 text-xs bg-rose-900/60 text-rose-300 rounded border border-rose-700">Refuses GK</span>';
+
+                row.innerHTML = `
+                    <td class="p-3 font-medium text-white">${player.name}</td>
+                    <td class="p-3">${prefBadge}</td>
+                    <td class="p-3">
+                        <select onchange="updatePosition(${index}, this.value)"
+                            class="bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-white focus:outline-none focus:border-emerald-500 text-xs">
+                            <option value="bench" ${player.currentPosition === 'bench' ? 'selected' : ''}>On Bench</option>
+                            <option value="G" ${player.currentPosition === 'G' ? 'selected' : ''}>G (Goalie)</option>
+                            <option value="D_l" ${player.currentPosition === 'D_l' ? 'selected' : ''}>D_l (Left Defender)</option>
+                            <option value="D_r" ${player.currentPosition === 'D_r' ? 'selected' : ''}>D_r (Right Defender)</option>
+                            <option value="M_l" ${player.currentPosition === 'M_l' ? 'selected' : ''}>M_l (Left Midfielder)</option>
+                            <option value="M_r" ${player.currentPosition === 'M_r' ? 'selected' : ''}>M_r (Right Midfielder)</option>
+                            <option value="F" ${player.currentPosition === 'F' ? 'selected' : ''}>F (Forward)</option>
+                        </select>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        function updatePosition(index, value) {
+            playerStates[index].currentPosition = value;
+            recalculateAll();
+        }
+
+        function generateRemainingChunks(remainingTimeTotal, totalGameTime = 48) {
+            const standardChunks = [
+                { id: 'Q1-1', quarter: 1, duration: 6 },
+                { id: 'Q1-2', quarter: 1, duration: 6 },
+                { id: 'Q2-1', quarter: 2, duration: 6 },
+                { id: 'Q2-2', quarter: 2, duration: 6 },
+                { id: 'Q3-1', quarter: 3, duration: 6 },
+                { id: 'Q3-2', quarter: 3, duration: 6 },
+                { id: 'Q4-1', quarter: 4, duration: 6 },
+                { id: 'Q4-2', quarter: 4, duration: 6 }
+            ];
+
+            const elapsedTotal = totalGameTime - remainingTimeTotal;
+            let accumulatedTime = 0;
+            const activeChunks = [];
+
+            for (let chunk of standardChunks) {
+                const chunkStart = accumulatedTime;
+                const chunkEnd = accumulatedTime + chunk.duration;
+
+                if (elapsedTotal < chunkEnd) {
+                    if (elapsedTotal > chunkStart) {
+                        const remainingDuration = chunkEnd - elapsedTotal;
+                        activeChunks.push({
+                            ...chunk,
+                            duration: remainingDuration,
+                            isPartial: true
+                        });
+                    } else {
+                        activeChunks.push({
+                            ...chunk,
+                            isPartial: false
+                        });
+                    }
+                }
+                accumulatedTime = chunkEnd;
+            }
+
+            return activeChunks;
+        }
+
+        function extractPlayerConstraints(playerStates, activeChunks) {
+            if (activeChunks.length === 0) return { currentChunkId: null, constraints: [] };
+
+            const currentChunkId = activeChunks[0].id;
+            let constraints = [];
+            let filledPositions = {};
+
+            playerStates.forEach(player => {
+                if (player.currentPosition !== 'bench') {
+                    const pos = player.currentPosition;
+                    if (!filledPositions[pos]) {
+                        filledPositions[pos] = player.name;
+                        constraints.push({ playerId: player.id, name: player.name, chunkId: currentChunkId, position: pos, status: 'valid' });
+                    } else {
+                        constraints.push({ playerId: player.id, name: player.name, chunkId: currentChunkId, position: pos, status: `dropped (conflict: ${pos} already filled by ${filledPositions[pos]})` });
+                    }
+                }
+            });
+
+            return { currentChunkId, constraints };
+        }
+
+        function renderChunks(chunks) {
+            const container = document.getElementById('chunks-container');
+            container.innerHTML = '';
+
+            if (chunks.length === 0) {
+                container.innerHTML = '<div class="text-sm text-slate-500 italic">No remaining time chunks. Game complete.</div>';
+                return;
+            }
+
+            chunks.forEach(chunk => {
+                const div = document.createElement('div');
+                div.className = `p-3 rounded-lg border flex justify-between items-center ${chunk.isPartial ? 'bg-amber-950/30 border-amber-600/50' : 'bg-slate-900 border-slate-700'}`;
+                div.innerHTML = `
+                    <div>
+                        <span class="font-bold text-white">${chunk.id}</span>
+                        <span class="text-xs text-slate-400 ml-2">Quarter ${chunk.quarter}</span>
+                        ${chunk.isPartial ? '<span class="ml-2 px-1.5 py-0.5 text-[10px] bg-amber-900/60 text-amber-300 rounded border border-amber-700">Active Partial</span>' : ''}
+                    </div>
+                    <div class="text-emerald-400 font-bold">${chunk.duration} min</div>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        function renderConstraints(result) {
+            const container = document.getElementById('constraints-container');
+            container.innerHTML = '';
+
+            if (!result.currentChunkId || result.constraints.length === 0) {
+                container.innerHTML = '<div class="text-sm text-slate-500 italic">No player position constraints active for current chunk.</div>';
+                return;
+            }
+
+            const headerInfo = document.createElement('div');
+            headerInfo.className = 'text-xs text-emerald-400 font-medium mb-2';
+            headerInfo.innerText = `Active Chunk Target: ${result.currentChunkId}`;
+            container.appendChild(headerInfo);
+
+            result.constraints.forEach(c => {
+                const isValid = c.status === 'valid';
+                const div = document.createElement('div');
+                div.className = `p-2.5 rounded-lg border text-sm flex justify-between items-center ${isValid ? 'bg-slate-900 border-slate-700 text-white' : 'bg-rose-950/30 border-rose-800/50 text-rose-300'}`;
+                div.innerHTML = `
+                    <span class="font-medium">${c.name} <span class="text-xs text-slate-400">(${c.position})</span></span>
+                    <span class="text-xs px-2 py-0.5 rounded ${isValid ? 'bg-emerald-900/50 text-emerald-300' : 'bg-rose-900/50 text-rose-200'}">${c.status}</span>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        function recalculateAll() {
+            const remainingTime = parseInt(document.getElementById('remaining-time').value) || 48;
+
+            const chunks = generateRemainingChunks(remainingTime);
+            const constraintsData = extractPlayerConstraints(playerStates, chunks);
+
+            renderChunks(chunks);
+            renderConstraints(constraintsData);
+        }
+
+        // Initial render
+        renderRoster();
+        recalculateAll();
+    </script>
+</body>
+</html>
