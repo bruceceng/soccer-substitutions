@@ -687,12 +687,13 @@
 
         // Leveling knobs for the free-slot picker (Stage 2/4)
         const levelingOptions = {
+            method: 'blocks',             // 'blocks' (count the 6N blocks, then place) or 'chunk-walk' (older)
             goalieCreditFraction: 0.5,    // share of a forced GOALIE chunk counted up front (1 = all)
             otherForcedCreditFraction: 1, // share of other forced chunks counted up front
             goaliePreferredOnTie: true    // on equal minutes, prefer players with a goalie chunk still ahead
         };
 
-        function greedyBalanceMinutes(payload, activeConstraints) {
+        function greedyBalanceMinutesChunkWalk(payload, activeConstraints) {
             let totalMinutesMap = {};
             payload.roster.forEach(p => {
                 const priorTotal = (p.priorMinutes.G || 0) + (p.priorMinutes.D || 0) + (p.priorMinutes.M || 0) + (p.priorMinutes.F || 0);
@@ -772,6 +773,178 @@
                 chunkPlayers: chunkPlayers,
                 errors: payload.errors
             };
+        }
+
+        // ---------------------------------------------------------------------------------
+        // STAGE 2/4 LEVELING (block counting)
+        //
+        // There are 6 slots (goalie + 5 field) x N remaining chunks = 6N blocks of time to hand out.
+        //   1. Forced blocks (goalie, live lineup, manual, copied-across-quarter) go straight to their player.
+        //   2. Each remaining block goes, one at a time, to the eligible player with the fewest total
+        //      minutes (prior + forced + blocks given so far). A player is ineligible once they hold N
+        //      blocks, because they can't be in two places at once.
+        //      Ties: players with a goalie chunk still ahead first (the kid who had to be in goal),
+        //      then alphabetical.
+        //   3. PLACEMENT: put each player's free blocks into chunks they aren't already forced in, keeping
+        //      every chunk at exactly 6 players. Kept as blocky as possible (same players in both halves
+        //      of a quarter when counts allow). A max-flow check guarantees each choice leaves the rest
+        //      solvable. If the counts can't be placed at all, the old chunk-walk is used instead.
+        // ---------------------------------------------------------------------------------
+        function canPlaceRemaining(demand, freeCap, forbidden, chunkIds, fromIdx, excludedNow, playerIds) {
+            // Max-flow: source -> player (demand) -> chunk (1, if allowed) -> sink (capacity)
+            const chunkList = [];
+            for (let j = fromIdx; j < chunkIds.length; j++) chunkList.push(j);
+            let needed = 0; playerIds.forEach(id => { needed += demand[id]; });
+            let supply = 0; chunkList.forEach(j => { supply += freeCap[j]; });
+            if (needed !== supply) return false;
+            if (needed === 0) return true;
+
+            const matchedTo = {};           // chunk j -> array of player ids assigned in the flow
+            chunkList.forEach(j => { matchedTo[j] = []; });
+            const allowed = (id, j) => !forbidden[j].has(id) && !(j === fromIdx && excludedNow.has(id));
+
+            // Unit-capacity augmenting paths (needs are tiny: <= ~10 players x 8 chunks)
+            function tryAugment(id, seen) {
+                for (const j of chunkList) {
+                    if (!allowed(id, j) || seen.has(j)) continue;
+                    seen.add(j);
+                    if (matchedTo[j].length < freeCap[j]) { matchedTo[j].push(id); return true; }
+                    for (let k = 0; k < matchedTo[j].length; k++) {
+                        const other = matchedTo[j][k];
+                        // `other` must be able to re-route elsewhere
+                        matchedTo[j][k] = id;
+                        if (reroute(other, seen, j)) return true;
+                        matchedTo[j][k] = other;
+                    }
+                }
+                return false;
+            }
+            function reroute(id, seen, fromChunk) {
+                for (const j of chunkList) {
+                    if (j === fromChunk || !allowed(id, j) || seen.has(j)) continue;
+                    if (matchedTo[j].includes(id)) continue;
+                    seen.add(j);
+                    if (matchedTo[j].length < freeCap[j]) { matchedTo[j].push(id); return true; }
+                    for (let k = 0; k < matchedTo[j].length; k++) {
+                        const other = matchedTo[j][k];
+                        matchedTo[j][k] = id;
+                        if (reroute(other, seen, j)) return true;
+                        matchedTo[j][k] = other;
+                    }
+                }
+                return false;
+            }
+            // each player needs `demand` distinct chunks: add one unit at a time
+            for (const id of playerIds) {
+                for (let u = 0; u < demand[id]; u++) {
+                    // a player can't take the same chunk twice
+                    const seen = new Set();
+                    chunkList.forEach(j => { if (matchedTo[j].includes(id)) seen.add(j); });
+                    if (!tryAugment(id, seen)) return false;
+                }
+            }
+            return true;
+        }
+
+        function levelByBlockCount(payload, activeConstraints) {
+            const chunks = payload.remainingChunks;
+            const N = chunks.length;
+            const playerIds = payload.roster.map(p => p.id);
+            const chunkIds = chunks.map(c => c.id);
+            if (N === 0) return null;
+
+            const priorTotal = {};
+            payload.roster.forEach(p => {
+                priorTotal[p.id] = (p.priorMinutes.G || 0) + (p.priorMinutes.D || 0) + (p.priorMinutes.M || 0) + (p.priorMinutes.F || 0);
+            });
+
+            // 1. Forced blocks
+            const forbidden = chunks.map(() => new Set());       // forced (player, chunk) pairs
+            const hasGoalieAhead = {};
+            const forcedMinutes = {}, forcedCount = {};
+            playerIds.forEach(id => { forcedMinutes[id] = 0; forcedCount[id] = 0; hasGoalieAhead[id] = 0; });
+            activeConstraints.forEach(c => {
+                const j = chunkIds.indexOf(c.chunkId);
+                if (j < 0 || forbidden[j].has(c.playerId)) return;
+                forbidden[j].add(c.playerId);
+                forcedMinutes[c.playerId] += chunks[j].duration;
+                forcedCount[c.playerId]++;
+                if (c.position === 'G') hasGoalieAhead[c.playerId] = 1;
+            });
+            const freeCap = chunks.map((c, j) => Math.max(0, 6 - forbidden[j].size));
+            const freeBlocks = freeCap.reduce((a, b) => a + b, 0);
+            const avgDur = chunks.reduce((a, c) => a + c.duration, 0) / N;
+
+            // 2. Hand out the remaining blocks one at a time to the player with the fewest minutes
+            const given = {};
+            playerIds.forEach(id => { given[id] = 0; });
+            for (let b = 0; b < freeBlocks; b++) {
+                const eligible = playerIds.filter(id => forcedCount[id] + given[id] < N);
+                if (eligible.length === 0) return null;
+                eligible.sort((a, c) => {
+                    const sa = priorTotal[a] + forcedMinutes[a] + given[a] * avgDur;
+                    const sc = priorTotal[c] + forcedMinutes[c] + given[c] * avgDur;
+                    if (sa !== sc) return sa - sc;
+                    if (hasGoalieAhead[a] !== hasGoalieAhead[c]) return hasGoalieAhead[c] - hasGoalieAhead[a];
+                    return a.localeCompare(c);
+                });
+                given[eligible[0]]++;
+            }
+
+            // 3. Placement
+            const demand = { ...given };
+            if (!canPlaceRemaining(demand, freeCap, forbidden, chunkIds, 0, new Set(), playerIds)) return null;
+
+            const chunkPlayers = {};
+            for (let j = 0; j < N; j++) {
+                const inChunk = new Set(forbidden[j]);
+                const prev = (j > 0 && chunks[j - 1].quarter === chunks[j].quarter) ? new Set(chunkPlayers[chunkIds[j - 1]]) : new Set();
+                let slotsLeft = freeCap[j];
+                const candidates = playerIds
+                    .filter(id => !forbidden[j].has(id) && demand[id] > 0)
+                    .sort((a, c) => {
+                        const pa = prev.has(a) ? 1 : 0, pc = prev.has(c) ? 1 : 0;
+                        if (pa !== pc) return pc - pa;                             // same players as the first half
+                        if (demand[a] !== demand[c]) return demand[c] - demand[a];  // biggest remaining need
+                        return a.localeCompare(c);
+                    });
+                for (const id of candidates) {
+                    if (slotsLeft === 0) break;
+                    demand[id]--; freeCap[j]--;
+                    inChunk.add(id);
+                    if (canPlaceRemaining(demand, freeCap, forbidden, chunkIds, j, inChunk, playerIds)) {
+                        slotsLeft--;
+                    } else {
+                        demand[id]++; freeCap[j]++; inChunk.delete(id);
+                    }
+                }
+                if (slotsLeft !== 0) return null;
+                chunkPlayers[chunkIds[j]] = Array.from(inChunk);
+                freeCap[j] = 0;
+            }
+
+            // Output in the same shape as before
+            const futureMinutesMap = {}, totalMinutesMap = {}, minutesAlreadyPlayed = {};
+            playerIds.forEach(id => { futureMinutesMap[id] = 0; minutesAlreadyPlayed[id] = priorTotal[id]; });
+            chunks.forEach(c => chunkPlayers[c.id].forEach(id => { futureMinutesMap[id] += c.duration; }));
+            playerIds.forEach(id => { totalMinutesMap[id] = priorTotal[id] + futureMinutesMap[id]; });
+            return {
+                metadata: payload.metadata,
+                minutesAlreadyPlayed, requiredFutureMinutes: futureMinutesMap,
+                totalCumulativeMinutes: totalMinutesMap, chunkPlayers, errors: payload.errors,
+                levelingMethod: 'blocks'
+            };
+        }
+
+        function greedyBalanceMinutes(payload, activeConstraints) {
+            if (levelingOptions.method === 'blocks') {
+                const result = levelByBlockCount(payload, activeConstraints);
+                if (result) return result;
+                console.warn('Block leveling could not place all counts; used chunk-walk fallback.');
+            }
+            const fallback = greedyBalanceMinutesChunkWalk(payload, activeConstraints);
+            fallback.levelingMethod = 'chunk-walk';
+            return fallback;
         }
 
         // STAGE 3: Quarter-by-Quarter Greedy Goalie Allocation with Exclusivity & Future Constraints
