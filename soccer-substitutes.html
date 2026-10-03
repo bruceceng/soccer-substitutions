@@ -26,7 +26,7 @@
                     oninput="recalculateAll()">
             </div>
             <div class="text-xs text-slate-400 bg-slate-900 p-3 rounded-lg border border-slate-700">
-                <span class="font-semibold text-emerald-400">Pipeline Stages:</span> Stage 0 (Copy forced slots across the quarter), Stage 1 (Payload & Constraints), Stage 2 (Initial Balance), Stage 3 (Quarter-by-Quarter Greedy Goalie Allocation with Exclusivity & Future Constraint Minutes), Stage 4 (Re-balanced Minutes), Stage 5 (Defense / Offense / Flex allocation & Pass 6 F/M Sub-positions).
+                <span class="font-semibold text-emerald-400">Pipeline Stages:</span> Stage 0 (Copy forced slots across the quarter), Stage 1 (Payload & Constraints), Stage 2 (Initial Balance), Stage 3 (Quarter-by-Quarter Greedy Goalie Allocation with Exclusivity & Future Constraint Minutes), Stage 4 (Re-balanced Minutes), Stage 5 (Defense D_L/D_R, Offense M_L/M_R/F allocation).
             </div>
         </div>
 
@@ -64,7 +64,7 @@
                 <div>
                     <h2 class="font-semibold text-lg text-white">Manual Player Constraints</h2>
                     <p class="text-xs text-slate-400">Force a player into a specific position for a specific time chunk.</p>
-            <div id="rule-banner" class="hidden mt-3 text-sm bg-rose-950/60 border border-rose-700 text-rose-200 rounded-lg p-3"></div>
+                    <div id="rule-banner" class="hidden mt-3 text-sm bg-rose-950/60 border border-rose-700 text-rose-200 rounded-lg p-3"></div>
                 </div>
                 <button onclick="addManualConstraintRow()" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium px-3 py-2 rounded-lg transition shadow">
                     + Add Constraint
@@ -129,7 +129,7 @@
         <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 shadow-lg flex flex-col space-y-3 md:col-span-2">
             <div class="flex justify-between items-center">
                 <h2 class="font-semibold text-lg text-white">Stage 5: Defense / Offense / Flex Allocation</h2>
-                <span class="text-xs px-2 py-0.5 rounded bg-emerald-900/60 text-emerald-300 border border-emerald-700 font-mono">Fair Def/Off Rotation & F/M Sub-positions</span>
+                <span class="text-xs px-2 py-0.5 rounded bg-emerald-900/60 text-emerald-300 border border-emerald-700 font-mono">Fair Def/Off Rotation & Sub-positions</span>
             </div>
             <!-- Visual container for DOM rendering -->
             <div id="stage5-visual-container" class="space-y-4 overflow-y-auto max-h-96 pr-1">
@@ -207,10 +207,10 @@
                             class="bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-white focus:outline-none focus:border-emerald-500 text-xs">
                             <option value="bench" ${player.currentPosition === 'bench' ? 'selected' : ''}>On Bench</option>
                             <option value="G" ${player.currentPosition === 'G' ? 'selected' : ''}>G (Goalie)</option>
-                            <option value="D_l" ${player.currentPosition === 'D_l' ? 'selected' : ''}>D_l (Left Defender)</option>
-                            <option value="D_r" ${player.currentPosition === 'D_r' ? 'selected' : ''}>D_r (Right Defender)</option>
-                            <option value="M_l" ${player.currentPosition === 'M_l' ? 'selected' : ''}>M_l (Left Midfielder)</option>
-                            <option value="M_r" ${player.currentPosition === 'M_r' ? 'selected' : ''}>M_r (Right Midfielder)</option>
+                            <option value="D_L" ${player.currentPosition === 'D_L' ? 'selected' : ''}>D_L (Left Defender)</option>
+                            <option value="D_R" ${player.currentPosition === 'D_R' ? 'selected' : ''}>D_R (Right Defender)</option>
+                            <option value="M_L" ${player.currentPosition === 'M_L' ? 'selected' : ''}>M_L (Left Midfielder)</option>
+                            <option value="M_R" ${player.currentPosition === 'M_R' ? 'selected' : ''}>M_R (Right Midfielder)</option>
                             <option value="F" ${player.currentPosition === 'F' ? 'selected' : ''}>F (Forward)</option>
                         </select>
                     </td>
@@ -427,12 +427,67 @@
             });
 
             // ---------------------------------------------------------------------------------
-            // PASS 6: Exhaustive Sub-Position Optimization for Offense (M_l, M_r, F slots)
+            // PASS 6A: Exhaustive Sub-Position Optimization for Defense (D_L, D_R slots)
             // ---------------------------------------------------------------------------------
-            const offensiveSlots = ['M_l', 'M_r', 'F'];
+            const defenseSlots = ['D_L', 'D_R'];
+            grid.forEach(g => {
+                const dPlayerIds = Object.keys(g.cells).filter(id => g.cells[id].role === 'D' && !g.cells[id].locked);
+                if (dPlayerIds.length === 2) {
+                    const permute = (arr) => {
+                        if (arr.length <= 1) return [arr];
+                        return arr.reduce((acc, item, i) => {
+                            const rest = [...arr.slice(0, i), ...arr.slice(i + 1)];
+                            return acc.concat(permute(rest).map(p => [item, ...p]));
+                        }, []);
+                    };
+                    const slotPermutations = Array.from(new Set(permute(defenseSlots).map(JSON.stringify))).map(JSON.parse);
+                    let bestScore = -Infinity;
+                    let bestAssignment = defenseSlots;
+
+                    slotPermutations.forEach(slotAssignment => {
+                        let currentScore = 0;
+                        dPlayerIds.forEach((playerId, index) => {
+                            const assignedSlot = slotAssignment[index];
+                            const playerObj = payload.roster.find(p => p.id === playerId);
+                            let ability = 1;
+                            if (playerObj) {
+                                if (playerObj.abilities && playerObj.abilities[assignedSlot] !== undefined) {
+                                    ability = playerObj.abilities[assignedSlot];
+                                } else if (playerObj.ratings && playerObj.ratings[assignedSlot] !== undefined) {
+                                    ability = playerObj.ratings[assignedSlot];
+                                }
+                            }
+                            currentScore += ability;
+                        });
+                        if (currentScore > bestScore) {
+                            bestScore = currentScore;
+                            bestAssignment = slotAssignment;
+                        }
+                    });
+
+                    dPlayerIds.forEach((playerId, index) => {
+                        const finalSubPos = bestAssignment[index];
+                        g.cells[playerId] = { role: 'D_SUB', locked: g.cells[playerId].locked, position: finalSubPos };
+                    });
+                } else {
+                    // For locked defense positions, normalize role tag
+                    Object.keys(g.cells).forEach(id => {
+                        if (g.cells[id].role === 'D' && !g.cells[id].position) {
+                            g.cells[id].position = 'D_L';
+                        }
+                        if (g.cells[id].role === 'D') {
+                            g.cells[id].role = 'D_SUB';
+                        }
+                    });
+                }
+            });
+
+            // ---------------------------------------------------------------------------------
+            // PASS 6B: Exhaustive Sub-Position Optimization for Offense (M_L, M_R, F slots)
+            // ---------------------------------------------------------------------------------
+            const offensiveSlots = ['M_L', 'M_R', 'F'];
 
             grid.forEach(g => {
-                // Collect players with role 'O' who are not locked to a specific sub-position already
                 const oPlayerIds = Object.keys(g.cells).filter(id => g.cells[id].role === 'O' && !g.cells[id].locked);
                 
                 if (oPlayerIds.length === 3) {
@@ -473,7 +528,17 @@
 
                     oPlayerIds.forEach((playerId, index) => {
                         const finalSubPos = bestAssignment[index];
-                        g.cells[playerId] = { role: 'O', locked: g.cells[playerId].locked, position: finalSubPos };
+                        const roleGroup = finalSubPos === 'F' ? 'F_ROLE' : 'O';
+                        g.cells[playerId] = { role: roleGroup, locked: g.cells[playerId].locked, position: finalSubPos };
+                    });
+                } else {
+                    Object.keys(g.cells).forEach(id => {
+                        if (g.cells[id].role === 'O') {
+                            if (!g.cells[id].position) g.cells[id].position = 'M_L';
+                            if (g.cells[id].position === 'F') {
+                                g.cells[id].role = 'F_ROLE';
+                            }
+                        }
                     });
                 }
             });
@@ -490,11 +555,15 @@
             const json = {
                 minMinutesPerCategory: MIN_POSITION_MINS,
                 chunks: grid.map(g => {
-                    const byRole = { G: [], D: [], O: [], Flex: [], Bench: [] };
+                    const byRole = { G: [], D: [], O: [], F: [], Flex: [], Bench: [] };
                     Object.keys(g.cells).forEach(id => {
                         const cell = g.cells[id];
                         const label = cell.position ? `${id} (${cell.position})` : id;
-                        if (cell.role === 'O') {
+                        if (cell.role === 'F_ROLE') {
+                            byRole.F.push(label);
+                        } else if (cell.role === 'D_SUB') {
+                            byRole.D.push(label);
+                        } else if (cell.role === 'O') {
                             byRole.O.push(label);
                         } else if (byRole[cell.role]) {
                             byRole[cell.role].push(label);
@@ -585,31 +654,44 @@
             container.innerHTML = html;
         }
 
+        function formatPositionLabel(pos) {
+            if (!pos) return '–';
+            return pos
+                .replace('_L', '<sub class="text-[9px] font-semibold">L</sub>')
+                .replace('_R', '<sub class="text-[9px] font-semibold">R</sub>');
+        }
+
         function renderStage5Visual(stage5) {
             const container = document.getElementById('stage5-visual-container');
             if (!container) return;
             if (stage5.grid.length === 0) { container.innerHTML = '<div class="text-sm text-slate-500 italic">No remaining chunks.</div>'; return; }
 
             const roleStyle = {
-                G: 'bg-rose-900/60 text-rose-200', D: 'bg-emerald-900/60 text-emerald-200',
-                O: 'bg-sky-900/60 text-sky-200', Flex: 'bg-amber-900/50 text-amber-200', Bench: 'text-slate-600'
+                G: 'bg-rose-900/60 text-rose-200',
+                D_SUB: 'bg-emerald-900/60 text-emerald-200',
+                O: 'bg-sky-900/60 text-sky-200',
+                F_ROLE: 'bg-orange-900/60 text-orange-200',
+                Flex: 'bg-amber-900/50 text-amber-200',
+                Bench: 'text-slate-600'
             };
+
             let html = `<table class="w-full text-xs text-center border-separate" style="border-spacing:2px">
                 <thead><tr class="text-slate-500"><th class="text-left pb-1">Player</th>
                 ${stage5.grid.map(g => `<th class="pb-1">${g.chunk.id}<div class="font-normal text-[10px]">${g.chunk.duration}m</div></th>`).join('')}
                 </tr></thead><tbody>`;
+            
             stage5.roster.forEach(p => {
                 html += `<tr><td class="text-left font-medium text-white pr-2">${p.name}</td>`;
                 stage5.grid.forEach(g => {
                     const cell = g.cells[p.id];
-                    // Display sub-position if available (e.g. M_l, M_r, F, D_l, D_r, G), otherwise fallback to role
-                    const label = cell.role === 'Bench' ? '–' : (cell.position || cell.role);
-                    html += `<td class="rounded py-1 ${roleStyle[cell.role]}">${label}${cell.locked && cell.role !== 'G' ? '*' : ''}</td>`;
+                    const posStr = cell.role === 'Bench' ? '–' : (cell.position || cell.role);
+                    const formattedPos = formatPositionLabel(posStr);
+                    html += `<td class="rounded py-1 ${roleStyle[cell.role] || 'text-slate-400'}">${formattedPos}${cell.locked && cell.role !== 'G' ? '*' : ''}</td>`;
                 });
                 html += `</tr>`;
             });
             html += `</tbody></table>
-                <div class="text-[11px] text-slate-500 mt-2">* = hard constraint. G = goalie, D_l/D_r = defense, M_l/M_r/F = offense sub-positions, Flex = field, any slot.</div>`;
+                <div class="text-[11px] text-slate-500 mt-2">* = hard constraint. G = goalie, D_L/D_R = defense, M_L/M_R = midfielders, F = forward (orange), Flex = field, any slot.</div>`;
             container.innerHTML = html;
         }
 
@@ -675,10 +757,10 @@
 
                 let posSelect = `<select onchange="updateManualConstraint(${index}, 'position', this.value)" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-white text-xs">
                     <option value="G" ${c.position === 'G' ? 'selected' : ''}>G</option>
-                    <option value="D_l" ${c.position === 'D_l' ? 'selected' : ''}>D_l</option>
-                    <option value="D_r" ${c.position === 'D_r' ? 'selected' : ''}>D_r</option>
-                    <option value="M_l" ${c.position === 'M_l' ? 'selected' : ''}>M_l</option>
-                    <option value="M_r" ${c.position === 'M_r' ? 'selected' : ''}>M_r</option>
+                    <option value="D_L" ${c.position === 'D_L' ? 'selected' : ''}>D_L</option>
+                    <option value="D_R" ${c.position === 'D_R' ? 'selected' : ''}>D_R</option>
+                    <option value="M_L" ${c.position === 'M_L' ? 'selected' : ''}>M_L</option>
+                    <option value="M_R" ${c.position === 'M_R' ? 'selected' : ''}>M_R</option>
                     <option value="F" ${c.position === 'F' ? 'selected' : ''}>F</option>
                 </select>`;
 
@@ -758,7 +840,7 @@
             return payload;
         }
 
-        const ALL_POSITIONS = ['G', 'D_l', 'D_r', 'M_l', 'M_r', 'F'];
+        const ALL_POSITIONS = ['G', 'D_L', 'D_R', 'M_L', 'M_R', 'F'];
         function checkPartialChunksFullyAssigned(payload) {
             const problems = [];
             payload.remainingChunks.filter(ch => ch.isPartial).forEach(ch => {
