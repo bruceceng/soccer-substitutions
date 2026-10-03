@@ -26,7 +26,7 @@
                     oninput="recalculateAll()">
             </div>
             <div class="text-xs text-slate-400 bg-slate-900 p-3 rounded-lg border border-slate-700">
-                <span class="font-semibold text-emerald-400">Pipeline Stages:</span> Stage 0 (Copy forced slots across the quarter), Stage 1 (Payload & Constraints), Stage 2 (Initial Balance), Stage 3 (Quarter-by-Quarter Greedy Goalie Allocation with Exclusivity & Future Constraint Minutes), Stage 4 (Re-balanced Minutes), Stage 5 (Defense / Offense / Flex allocation).
+                <span class="font-semibold text-emerald-400">Pipeline Stages:</span> Stage 0 (Copy forced slots across the quarter), Stage 1 (Payload & Constraints), Stage 2 (Initial Balance), Stage 3 (Quarter-by-Quarter Greedy Goalie Allocation with Exclusivity & Future Constraint Minutes), Stage 4 (Re-balanced Minutes), Stage 5 (Defense / Offense / Flex allocation & Pass 6 F/M Sub-positions).
             </div>
         </div>
 
@@ -129,7 +129,7 @@
         <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 shadow-lg flex flex-col space-y-3 md:col-span-2">
             <div class="flex justify-between items-center">
                 <h2 class="font-semibold text-lg text-white">Stage 5: Defense / Offense / Flex Allocation</h2>
-                <span class="text-xs px-2 py-0.5 rounded bg-emerald-900/60 text-emerald-300 border border-emerald-700 font-mono">Fair Def/Off Rotation</span>
+                <span class="text-xs px-2 py-0.5 rounded bg-emerald-900/60 text-emerald-300 border border-emerald-700 font-mono">Fair Def/Off Rotation & F/M Sub-positions</span>
             </div>
             <!-- Visual container for DOM rendering -->
             <div id="stage5-visual-container" class="space-y-4 overflow-y-auto max-h-96 pr-1">
@@ -219,276 +219,304 @@
             });
         }
 
-        // ---------------------------------------------------------------------------------
-        // STAGE 5: Defense / Offense / Flex allocation
-        //
-        // Takes who is on the field in each chunk (from Stage 4) and labels every player-chunk:
-        //   G     - goalie (from the G constraints Stage 4 applied)
-        //   D     - defense  (D_l / D_r)
-        //   O     - offense  (M_l / M_r / F)
-        //   Flex  - on the field, but not needed to hit the D/O minimums, so any slot is fine
-        //   Bench - not on the field
-        //
-        // Steps:
-        //   1. Lock: every hard constraint (manual, live field, propagated) marks that player-chunk D or O.
-        //   2. Defense pass: for each chunk's open D slots, pick unlabeled players who most need D minutes.
-        //   3. Offense pass: same for open O slots.
-        //   4. Whatever is left unlabeled becomes Flex.
-        // "Need" means below MIN_POSITION_MINS (prior + locked + assigned so far) in that category.
-        // ---------------------------------------------------------------------------------
-        // ---------------------------------------------------------------------------------
-// STAGE 5 (Updated): 5A (Full Quarters D) -> 5B (Half/Remaining Quarters D) -> O & Flex
-// ---------------------------------------------------------------------------------
-const MIN_POSITION_MINS = 9;   
-const DEFENSE_SLOTS = 2;
-const OFFENSE_SLOTS = 3;       
+        const MIN_POSITION_MINS = 9;   
+        const DEFENSE_SLOTS = 2;
+        const OFFENSE_SLOTS = 3;       
 
-function allocatePositionCategories(stage4Output, payload, chunks, constraints) {
-    const warnings = [];
-    const stats = {};
-    payload.roster.forEach(p => {
-        const pr = p.priorMinutes;
-        stats[p.id] = {
-            name: p.name,
-            playedSoFar: (pr.G || 0) + (pr.D || 0) + (pr.M || 0) + (pr.F || 0),
-            G: pr.G || 0, D: pr.D || 0, O: (pr.M || 0) + (pr.F || 0), Flex: 0,
-            futureMinutes: 0,
-            pending: 0
-        };
-    });
-
-    const quarterMap = {};
-    chunks.forEach(chunk => {
-        if (!quarterMap[chunk.quarter]) quarterMap[chunk.quarter] = [];
-        quarterMap[chunk.quarter].push(chunk);
-    });
-
-    const orderedChunks = [];
-    Object.keys(quarterMap).sort((a, b) => a - b).forEach(q => {
-        quarterMap[q].forEach(ch => orderedChunks.push(ch));
-    });
-
-    const grid = orderedChunks.map(chunk => {
-        const playerIds = stage4Output.chunkPlayers[chunk.id] || [];
-        const chunkConstraints = constraints.filter(c => c.chunkId === chunk.id);
-        const goalieC = chunkConstraints.find(c => c.position === 'G');
-        const cells = {};
-        payload.roster.forEach(p => { cells[p.id] = { role: 'Bench', locked: false }; });
-        let lockedD = 0, lockedO = 0;
-
-        playerIds.forEach(id => {
-            const c = chunkConstraints.find(x => x.playerId === id);
-            if (c && c.position === 'G') {
-                cells[id] = { role: 'G', locked: true };
-                stats[id].G += chunk.duration;
-            } else if (c && c.position.startsWith('D')) {
-                cells[id] = { role: 'D', locked: true, position: c.position };
-                stats[id].D += chunk.duration; lockedD++;
-            } else if (c) {
-                cells[id] = { role: 'O', locked: true, position: c.position };
-                stats[id].O += chunk.duration; lockedO++;
-            } else {
-                cells[id] = { role: null, locked: false };
-                stats[id].pending += chunk.duration;
-            }
-            stats[id].futureMinutes += chunk.duration;
-        });
-
-        if (!goalieC) warnings.push(`${chunk.id}: no goalie assigned.`);
-
-        return {
-            chunk, cells,
-            slotsLeft: {
-                D: Math.max(0, DEFENSE_SLOTS - lockedD),
-                O: Math.max(0, OFFENSE_SLOTS - lockedO)
-            }
-        };
-    });
-
-    const fullQuarterPairs = [];
-    const individualChunks = [];
-
-    Object.keys(quarterMap).sort((a, b) => a - b).forEach(q => {
-        const qChunks = quarterMap[q].map(ch => grid.find(g => g.chunk.id === ch.id));
-        if (qChunks.length === 2 && !qChunks[0].chunk.isPartial && !qChunks[1].chunk.isPartial) {
-            fullQuarterPairs.push(qChunks);
-        } else {
-            qChunks.forEach(ch => individualChunks.push(ch));
-        }
-    });
-
-    // -------------------------------------------------------------
-    // STAGE 5A: Full Quarters of Defense
-    // Assign full 12-minute blocks of D to players who need D most.
-    // -------------------------------------------------------------
-    fullQuarterPairs.forEach(pair => {
-        const [g1, g2] = pair;
-        const blockDuration = g1.chunk.duration + g2.chunk.duration;
-
-        while (g1.slotsLeft.D > 0 && g2.slotsLeft.D > 0) {
-            const candidates = Object.keys(g1.cells)
-                .filter(id => g1.cells[id].role === null && g2.cells[id].role === null)
-                .filter(id => stats[id].pending >= blockDuration)
-                .sort((a, b) => {
-                    if (stats[a].D !== stats[b].D) return stats[a].D - stats[b].D;
-                    if (stats[a].pending !== stats[b].pending) return stats[a].pending - stats[b].pending;
-                    return a.localeCompare(b);
-                });
-
-            if (candidates.length === 0) break;
-            const id = candidates[0];
-
-            [g1, g2].forEach(g => {
-                g.cells[id] = { role: 'D', locked: false };
-                stats[id].D += g.chunk.duration;
-                stats[id].pending -= g.chunk.duration;
-                g.slotsLeft.D--;
+        function allocatePositionCategories(stage4Output, payload, chunks, constraints) {
+            const warnings = [];
+            const stats = {};
+            payload.roster.forEach(p => {
+                const pr = p.priorMinutes;
+                stats[p.id] = {
+                    name: p.name,
+                    playedSoFar: (pr.G || 0) + (pr.D || 0) + (pr.M || 0) + (pr.F || 0),
+                    G: pr.G || 0, D: pr.D || 0, O: (pr.M || 0) + (pr.F || 0), Flex: 0,
+                    futureMinutes: 0,
+                    pending: 0
+                };
             });
-        }
-    });
 
-    // -------------------------------------------------------------
-    // STAGE 5B: Half-Quarters / Remaining Chunks for Defense
-    // Go through individual chunks/half-quarters and assign remaining 
-    // D slots to whoever still needs D.
-    // -------------------------------------------------------------
-    individualChunks.forEach(g => {
-        const dur = g.chunk.duration;
-        while (g.slotsLeft.D > 0) {
-            const candidates = Object.keys(g.cells)
-                .filter(id => g.cells[id].role === null)
-                .filter(id => stats[id].pending >= dur)
-                .sort((a, b) => {
-                    if (stats[a].D !== stats[b].D) return stats[a].D - stats[b].D;
-                    if (stats[a].pending !== stats[b].pending) return stats[a].pending - stats[b].pending;
-                    return a.localeCompare(b);
+            const quarterMap = {};
+            chunks.forEach(chunk => {
+                if (!quarterMap[chunk.quarter]) quarterMap[chunk.quarter] = [];
+                quarterMap[chunk.quarter].push(chunk);
+            });
+
+            const orderedChunks = [];
+            Object.keys(quarterMap).sort((a, b) => a - b).forEach(q => {
+                quarterMap[q].forEach(ch => orderedChunks.push(ch));
+            });
+
+            const grid = orderedChunks.map(chunk => {
+                const playerIds = stage4Output.chunkPlayers[chunk.id] || [];
+                const chunkConstraints = constraints.filter(c => c.chunkId === chunk.id);
+                const goalieC = chunkConstraints.find(c => c.position === 'G');
+                const cells = {};
+                payload.roster.forEach(p => { cells[p.id] = { role: 'Bench', locked: false }; });
+                let lockedD = 0, lockedO = 0;
+
+                playerIds.forEach(id => {
+                    const c = chunkConstraints.find(x => x.playerId === id);
+                    if (c && c.position === 'G') {
+                        cells[id] = { role: 'G', locked: true, position: 'G' };
+                        stats[id].G += chunk.duration;
+                    } else if (c && c.position.startsWith('D')) {
+                        cells[id] = { role: 'D', locked: true, position: c.position };
+                        stats[id].D += chunk.duration; lockedD++;
+                    } else if (c) {
+                        cells[id] = { role: 'O', locked: true, position: c.position };
+                        stats[id].O += chunk.duration; lockedO++;
+                    } else {
+                        cells[id] = { role: null, locked: false };
+                        stats[id].pending += chunk.duration;
+                    }
+                    stats[id].futureMinutes += chunk.duration;
                 });
 
-            if (candidates.length === 0) break;
-            const id = candidates[0];
+                if (!goalieC) warnings.push(`${chunk.id}: no goalie assigned.`);
 
-            g.cells[id] = { role: 'D', locked: false };
-            stats[id].D += dur;
-            stats[id].pending -= dur;
-            g.slotsLeft.D--;
-        }
-    });
+                return {
+                    chunk, cells,
+                    slotsLeft: {
+                        D: Math.max(0, DEFENSE_SLOTS - lockedD),
+                        O: Math.max(0, OFFENSE_SLOTS - lockedO)
+                    }
+                };
+            });
 
-    // Also check if any full-quarter pairs have leftover slots after 5A due to constraints
-    fullQuarterPairs.forEach(pair => {
-        pair.forEach(g => {
-            const dur = g.chunk.duration;
-            while (g.slotsLeft.D > 0) {
-                const candidates = Object.keys(g.cells)
-                    .filter(id => g.cells[id].role === null)
-                    .filter(id => stats[id].pending >= dur)
-                    .sort((a, b) => {
-                        if (stats[a].D !== stats[b].D) return stats[a].D - stats[b].D;
-                        return a.localeCompare(b);
+            const fullQuarterPairs = [];
+            const individualChunks = [];
+
+            Object.keys(quarterMap).sort((a, b) => a - b).forEach(q => {
+                const qChunks = quarterMap[q].map(ch => grid.find(g => g.chunk.id === ch.id));
+                if (qChunks.length === 2 && !qChunks[0].chunk.isPartial && !qChunks[1].chunk.isPartial) {
+                    fullQuarterPairs.push(qChunks);
+                } else {
+                    qChunks.forEach(ch => individualChunks.push(ch));
+                }
+            });
+
+            // STAGE 5A: Full Quarters of Defense
+            fullQuarterPairs.forEach(pair => {
+                const [g1, g2] = pair;
+                const blockDuration = g1.chunk.duration + g2.chunk.duration;
+
+                while (g1.slotsLeft.D > 0 && g2.slotsLeft.D > 0) {
+                    const candidates = Object.keys(g1.cells)
+                        .filter(id => g1.cells[id].role === null && g2.cells[id].role === null)
+                        .filter(id => stats[id].pending >= blockDuration)
+                        .sort((a, b) => {
+                            if (stats[a].D !== stats[b].D) return stats[a].D - stats[b].D;
+                            if (stats[a].pending !== stats[b].pending) return stats[a].pending - stats[b].pending;
+                            return a.localeCompare(b);
+                        });
+
+                    if (candidates.length === 0) break;
+                    const id = candidates[0];
+
+                    [g1, g2].forEach(g => {
+                        g.cells[id] = { role: 'D', locked: false };
+                        stats[id].D += g.chunk.duration;
+                        stats[id].pending -= g.chunk.duration;
+                        g.slotsLeft.D--;
                     });
-                if (candidates.length === 0) break;
-                const id = candidates[0];
-                g.cells[id] = { role: 'D', locked: false };
-                stats[id].D += dur;
-                stats[id].pending -= dur;
-                g.slotsLeft.D--;
-            }
-        });
-    });
-
-    // -------------------------------------------------------------
-    // STAGE 5C/5D: Offense (Full Quarters then Half/Remaining Chunks)
-    // -------------------------------------------------------------
-    fullQuarterPairs.forEach(pair => {
-        const [g1, g2] = pair;
-        const blockDuration = g1.chunk.duration + g2.chunk.duration;
-
-        while (g1.slotsLeft.O > 0 && g2.slotsLeft.O > 0) {
-            const candidates = Object.keys(g1.cells)
-                .filter(id => g1.cells[id].role === null && g2.cells[id].role === null)
-                .filter(id => stats[id].pending >= blockDuration)
-                .sort((a, b) => {
-                    if (stats[a].O !== stats[b].O) return stats[a].O - stats[b].O;
-                    if (stats[a].pending !== stats[b].pending) return stats[a].pending - stats[b].pending;
-                    return a.localeCompare(b);
-                });
-
-            if (candidates.length === 0) break;
-            const id = candidates[0];
-
-            [g1, g2].forEach(g => {
-                g.cells[id] = { role: 'O', locked: false };
-                stats[id].O += g.chunk.duration;
-                stats[id].pending -= g.chunk.duration;
-                g.slotsLeft.O--;
+                }
             });
-        }
-    });
 
-    grid.forEach(g => {
-        const dur = g.chunk.duration;
-        while (g.slotsLeft.O > 0) {
-            const candidates = Object.keys(g.cells)
-                .filter(id => g.cells[id].role === null)
-                .filter(id => stats[id].pending >= dur)
-                .sort((a, b) => {
-                    if (stats[a].O !== stats[b].O) return stats[a].O - stats[b].O;
-                    return a.localeCompare(b);
+            // STAGE 5B: Half-Quarters / Remaining Chunks for Defense
+            individualChunks.forEach(g => {
+                const dur = g.chunk.duration;
+                while (g.slotsLeft.D > 0) {
+                    const candidates = Object.keys(g.cells)
+                        .filter(id => g.cells[id].role === null)
+                        .filter(id => stats[id].pending >= dur)
+                        .sort((a, b) => {
+                            if (stats[a].D !== stats[b].D) return stats[a].D - stats[b].D;
+                            if (stats[a].pending !== stats[b].pending) return stats[a].pending - stats[b].pending;
+                            return a.localeCompare(b);
+                        });
+
+                    if (candidates.length === 0) break;
+                    const id = candidates[0];
+
+                    g.cells[id] = { role: 'D', locked: false };
+                    stats[id].D += dur;
+                    stats[id].pending -= dur;
+                    g.slotsLeft.D--;
+                }
+            });
+
+            fullQuarterPairs.forEach(pair => {
+                pair.forEach(g => {
+                    const dur = g.chunk.duration;
+                    while (g.slotsLeft.D > 0) {
+                        const candidates = Object.keys(g.cells)
+                            .filter(id => g.cells[id].role === null)
+                            .filter(id => stats[id].pending >= dur)
+                            .sort((a, b) => {
+                                if (stats[a].D !== stats[b].D) return stats[a].D - stats[b].D;
+                                return a.localeCompare(b);
+                            });
+                        if (candidates.length === 0) break;
+                        const id = candidates[0];
+                        g.cells[id] = { role: 'D', locked: false };
+                        stats[id].D += dur;
+                        stats[id].pending -= dur;
+                        g.slotsLeft.D--;
+                    }
                 });
-            if (candidates.length === 0) break;
-            const id = candidates[0];
-            g.cells[id] = { role: 'O', locked: false };
-            stats[id].O += dur;
-            stats[id].pending -= dur;
-            g.slotsLeft.O--;
+            });
+
+            // STAGE 5C: Full Quarters of Offense
+            fullQuarterPairs.forEach(pair => {
+                const [g1, g2] = pair;
+                const blockDuration = g1.chunk.duration + g2.chunk.duration;
+
+                while (g1.slotsLeft.O > 0 && g2.slotsLeft.O > 0) {
+                    const candidates = Object.keys(g1.cells)
+                        .filter(id => g1.cells[id].role === null && g2.cells[id].role === null)
+                        .filter(id => stats[id].pending >= blockDuration)
+                        .sort((a, b) => {
+                            if (stats[a].O !== stats[b].O) return stats[a].O - stats[b].O;
+                            if (stats[a].pending !== stats[b].pending) return stats[a].pending - stats[b].pending;
+                            return a.localeCompare(b);
+                        });
+
+                    if (candidates.length === 0) break;
+                    const id = candidates[0];
+
+                    [g1, g2].forEach(g => {
+                        g.cells[id] = { role: 'O', locked: false };
+                        stats[id].O += g.chunk.duration;
+                        stats[id].pending -= g.chunk.duration;
+                        g.slotsLeft.O--;
+                    });
+                }
+            });
+
+            // STAGE 5D: Half-Quarters / Remaining Chunks for Offense
+            grid.forEach(g => {
+                const dur = g.chunk.duration;
+                while (g.slotsLeft.O > 0) {
+                    const candidates = Object.keys(g.cells)
+                        .filter(id => g.cells[id].role === null)
+                        .filter(id => stats[id].pending >= dur)
+                        .sort((a, b) => {
+                            if (stats[a].O !== stats[b].O) return stats[a].O - stats[b].O;
+                            return a.localeCompare(b);
+                        });
+                    if (candidates.length === 0) break;
+                    const id = candidates[0];
+                    g.cells[id] = { role: 'O', locked: false };
+                    stats[id].O += dur;
+                    stats[id].pending -= dur;
+                    g.slotsLeft.O--;
+                }
+            });
+
+            // STAGE 5E: Remainder / Flex
+            grid.forEach(g => {
+                Object.keys(g.cells).forEach(id => {
+                    if (g.cells[id].role === null) {
+                        g.cells[id] = { role: 'Flex', locked: false, position: 'Flex' };
+                        stats[id].Flex += g.chunk.duration;
+                        stats[id].pending -= g.chunk.duration;
+                    }
+                });
+            });
+
+            // ---------------------------------------------------------------------------------
+            // PASS 6: Exhaustive Sub-Position Optimization for Offense (M_l, M_r, F slots)
+            // ---------------------------------------------------------------------------------
+            const offensiveSlots = ['M_l', 'M_r', 'F'];
+
+            grid.forEach(g => {
+                // Collect players with role 'O' who are not locked to a specific sub-position already
+                const oPlayerIds = Object.keys(g.cells).filter(id => g.cells[id].role === 'O' && !g.cells[id].locked);
+                
+                if (oPlayerIds.length === 3) {
+                    const permute = (arr) => {
+                        if (arr.length <= 1) return [arr];
+                        return arr.reduce((acc, item, i) => {
+                            const rest = [...arr.slice(0, i), ...arr.slice(i + 1)];
+                            return acc.concat(permute(rest).map(p => [item, ...p]));
+                        }, []);
+                    };
+
+                    const slotPermutations = Array.from(new Set(permute(offensiveSlots).map(JSON.stringify))).map(JSON.parse);
+                    let bestScore = -Infinity;
+                    let bestAssignment = offensiveSlots;
+
+                    slotPermutations.forEach(slotAssignment => {
+                        let currentScore = 0;
+                        oPlayerIds.forEach((playerId, index) => {
+                            const assignedSlot = slotAssignment[index];
+                            const playerObj = payload.roster.find(p => p.id === playerId);
+                            
+                            let ability = 1;
+                            if (playerObj) {
+                                if (playerObj.abilities && playerObj.abilities[assignedSlot] !== undefined) {
+                                    ability = playerObj.abilities[assignedSlot];
+                                } else if (playerObj.ratings && playerObj.ratings[assignedSlot] !== undefined) {
+                                    ability = playerObj.ratings[assignedSlot];
+                                }
+                            }
+                            currentScore += ability;
+                        });
+
+                        if (currentScore > bestScore) {
+                            bestScore = currentScore;
+                            bestAssignment = slotAssignment;
+                        }
+                    });
+
+                    oPlayerIds.forEach((playerId, index) => {
+                        const finalSubPos = bestAssignment[index];
+                        g.cells[playerId] = { role: 'O', locked: g.cells[playerId].locked, position: finalSubPos };
+                    });
+                }
+            });
+
+            // Validation warnings
+            payload.roster.forEach(p => {
+                const s = stats[p.id];
+                const fieldMins = s.D + s.O + s.Flex;
+                if (fieldMins > 0 && s.D < MIN_POSITION_MINS) warnings.push(`${p.name}: only ${s.D}m defense projected.`);
+                if (fieldMins > 0 && s.O < MIN_POSITION_MINS) warnings.push(`${p.name}: only ${s.O}m offense projected.`);
+                if (fieldMins === 0) warnings.push(`${p.name}: no field time projected.`);
+            });
+
+            const json = {
+                minMinutesPerCategory: MIN_POSITION_MINS,
+                chunks: grid.map(g => {
+                    const byRole = { G: [], D: [], O: [], Flex: [], Bench: [] };
+                    Object.keys(g.cells).forEach(id => {
+                        const cell = g.cells[id];
+                        const label = cell.position ? `${id} (${cell.position})` : id;
+                        if (cell.role === 'O') {
+                            byRole.O.push(label);
+                        } else if (byRole[cell.role]) {
+                            byRole[cell.role].push(label);
+                        }
+                    });
+                    return { chunkId: g.chunk.id, duration: g.chunk.duration, ...byRole };
+                }),
+                playerProjections: Object.fromEntries(payload.roster.map(p => {
+                    const s = stats[p.id];
+                    return [p.id, {
+                        playedSoFar: s.playedSoFar,
+                        remaining: s.futureMinutes,
+                        projectedTotal: s.playedSoFar + s.futureMinutes,
+                        G: s.G, D: s.D, O: s.O, Flex: s.Flex
+                    }];
+                })),
+                warnings
+            };
+
+            return { grid, stats, roster: payload.roster, warnings, json };
         }
-    });
 
-    // -------------------------------------------------------------
-    // Remainder: Flex
-    // -------------------------------------------------------------
-    grid.forEach(g => {
-        Object.keys(g.cells).forEach(id => {
-            if (g.cells[id].role === null) {
-                g.cells[id] = { role: 'Flex', locked: false };
-                stats[id].Flex += g.chunk.duration;
-                stats[id].pending -= g.chunk.duration;
-            }
-        });
-    });
-
-    // Validation warnings
-    payload.roster.forEach(p => {
-        const s = stats[p.id];
-        const fieldMins = s.D + s.O + s.Flex;
-        if (fieldMins > 0 && s.D < MIN_POSITION_MINS) warnings.push(`${p.name}: only ${s.D}m defense projected.`);
-        if (fieldMins > 0 && s.O < MIN_POSITION_MINS) warnings.push(`${p.name}: only ${s.O}m offense projected.`);
-        if (fieldMins === 0) warnings.push(`${p.name}: no field time projected.`);
-    });
-
-    const json = {
-        minMinutesPerCategory: MIN_POSITION_MINS,
-        chunks: grid.map(g => {
-            const byRole = { G: [], D: [], O: [], Flex: [], Bench: [] };
-            Object.keys(g.cells).forEach(id => byRole[g.cells[id].role].push(g.cells[id].locked && g.cells[id].position ? `${id} (${g.cells[id].position})` : id));
-            return { chunkId: g.chunk.id, duration: g.chunk.duration, ...byRole };
-        }),
-        playerProjections: Object.fromEntries(payload.roster.map(p => {
-            const s = stats[p.id];
-            return [p.id, {
-                playedSoFar: s.playedSoFar,
-                remaining: s.futureMinutes,
-                projectedTotal: s.playedSoFar + s.futureMinutes,
-                G: s.G, D: s.D, O: s.O, Flex: s.Flex
-            }];
-        })),
-        warnings
-    };
-
-    return { grid, stats, roster: payload.roster, warnings, json };
-}
-
-        // Main check: each player's projected end-of-game totals by category
         function renderPlayerSummaryReport(stage5) {
             let container = document.getElementById('stage5-player-summary');
             if (!container) {
@@ -557,7 +585,6 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
             container.innerHTML = html;
         }
 
-        // Grid: one row per player, one column per remaining chunk. * marks a hard-constrained cell.
         function renderStage5Visual(stage5) {
             const container = document.getElementById('stage5-visual-container');
             if (!container) return;
@@ -575,13 +602,14 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
                 html += `<tr><td class="text-left font-medium text-white pr-2">${p.name}</td>`;
                 stage5.grid.forEach(g => {
                     const cell = g.cells[p.id];
-                    const label = cell.role === 'Bench' ? '–' : cell.role;
+                    // Display sub-position if available (e.g. M_l, M_r, F, D_l, D_r, G), otherwise fallback to role
+                    const label = cell.role === 'Bench' ? '–' : (cell.position || cell.role);
                     html += `<td class="rounded py-1 ${roleStyle[cell.role]}">${label}${cell.locked && cell.role !== 'G' ? '*' : ''}</td>`;
                 });
                 html += `</tr>`;
             });
             html += `</tbody></table>
-                <div class="text-[11px] text-slate-500 mt-2">* = hard constraint (manual, live field, or copied across the quarter). G = goalie, D = defense, O = offense (M/F), Flex = field, any slot.</div>`;
+                <div class="text-[11px] text-slate-500 mt-2">* = hard constraint. G = goalie, D_l/D_r = defense, M_l/M_r/F = offense sub-positions, Flex = field, any slot.</div>`;
             container.innerHTML = html;
         }
 
@@ -707,10 +735,6 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
             return activeChunks;
         }
 
-
-        // STAGE 0: Copy each forced slot to the other half of its quarter when that half is blank.
-        // A copy is skipped if the sibling chunk already has someone in that slot (an intentional
-        // split between two players) or if the same player is already placed elsewhere in that chunk.
         function propagateConstraintsWithinQuarter(payload) {
             const propagated = [];
             const originals = [...payload.constraints];
@@ -734,9 +758,6 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
             return payload;
         }
 
-
-        // HARD RULE: a partial (short) chunk must be fully assigned. Nobody is subbed mid-chunk, so all
-        // six positions (live field and/or manual) have to be filled before the plan can be built.
         const ALL_POSITIONS = ['G', 'D_l', 'D_r', 'M_l', 'M_r', 'F'];
         function checkPartialChunksFullyAssigned(payload) {
             const problems = [];
@@ -812,12 +833,11 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
             };
         }
 
-        // Leveling knobs for the free-slot picker (Stage 2/4)
         const levelingOptions = {
-            method: 'blocks',             // 'blocks' (count the 6N blocks, then place) or 'chunk-walk' (older)
-            goalieCreditFraction: 0.5,    // share of a forced GOALIE chunk counted up front (1 = all)
-            otherForcedCreditFraction: 1, // share of other forced chunks counted up front
-            goaliePreferredOnTie: true    // on equal minutes, prefer players with a goalie chunk still ahead
+            method: 'blocks',
+            goalieCreditFraction: 0.5,
+            otherForcedCreditFraction: 1,
+            goaliePreferredOnTie: true
         };
 
         function greedyBalanceMinutesChunkWalk(payload, activeConstraints) {
@@ -833,10 +853,7 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
             let minutesAlreadyPlayed = {};
             payload.roster.forEach(p => { minutesAlreadyPlayed[p.id] = totalMinutesMap[p.id]; });
 
-            // STEP A: Credit every forced allocation (goalie, live field, manual, propagated) up front.
-            // Those players "already owe" this time, so the free-slot picks below see their real
-            // end-of-game load instead of discovering it only when the chunk is reached.
-            const forcedByChunk = {};   // chunkId -> Map(playerId -> {credit, isGoalie})
+            const forcedByChunk = {};
             payload.remainingChunks.forEach(chunk => { forcedByChunk[chunk.id] = new Map(); });
             activeConstraints.forEach(c => {
                 const chunk = payload.remainingChunks.find(ch => ch.id === c.chunkId);
@@ -845,22 +862,17 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
                 const frac = isGoalie ? levelingOptions.goalieCreditFraction : levelingOptions.otherForcedCreditFraction;
                 const credit = chunk.duration * frac;
                 forcedByChunk[chunk.id].set(c.playerId, { credit, isGoalie });
-                futureMinutesMap[c.playerId] = (futureMinutesMap[c.playerId] || 0) + chunk.duration;   // true minutes
-                totalMinutesMap[c.playerId] = (totalMinutesMap[c.playerId] || 0) + credit;            // leveling score
+                futureMinutesMap[c.playerId] = (futureMinutesMap[c.playerId] || 0) + chunk.duration;
+                totalMinutesMap[c.playerId] = (totalMinutesMap[c.playerId] || 0) + credit;
             });
 
-            // STEP B: Walk the chunks. Forced players are already counted; only the players we pick
-            // for the open slots get minutes added here.
             payload.remainingChunks.forEach((chunk, chunkIndex) => {
                 const playersPlayingInChunk = new Set(forcedByChunk[chunk.id].keys());
 
-                // Reaching a forced chunk: the part we didn't count up front is now played, so count it.
                 forcedByChunk[chunk.id].forEach((info, playerId) => {
                     totalMinutesMap[playerId] += chunk.duration - info.credit;
                 });
 
-                // Scarcity: how many LATER chunks could this player still be picked for freely?
-                // Goalie-ahead: does this player still have a forced goalie chunk later on?
                 const laterFreeChunks = {};
                 const goalieAhead = {};
                 payload.roster.forEach(p => {
@@ -869,7 +881,7 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
                     goalieAhead[p.id] = later.some(ch => forcedByChunk[ch.id].has(p.id) && forcedByChunk[ch.id].get(p.id).isGoalie) ? 1 : 0;
                 });
 
-                const totalFieldSlots = 6;   // goalie + 5 field
+                const totalFieldSlots = 6;
                 const slotsToFill = totalFieldSlots - playersPlayingInChunk.size;
 
                 for (let i = 0; i < slotsToFill; i++) {
@@ -902,23 +914,7 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
             };
         }
 
-        // ---------------------------------------------------------------------------------
-        // STAGE 2/4 LEVELING (block counting)
-        //
-        // There are 6 slots (goalie + 5 field) x N remaining chunks = 6N blocks of time to hand out.
-        //   1. Forced blocks (goalie, live lineup, manual, copied-across-quarter) go straight to their player.
-        //   2. Each remaining block goes, one at a time, to the eligible player with the fewest total
-        //      minutes (prior + forced + blocks given so far). A player is ineligible once they hold N
-        //      blocks, because they can't be in two places at once.
-        //      Ties: players with a goalie chunk still ahead first (the kid who had to be in goal),
-        //      then alphabetical.
-        //   3. PLACEMENT: put each player's free blocks into chunks they aren't already forced in, keeping
-        //      every chunk at exactly 6 players. Kept as blocky as possible (same players in both halves
-        //      of a quarter when counts allow). A max-flow check guarantees each choice leaves the rest
-        //      solvable. If the counts can't be placed at all, the old chunk-walk is used instead.
-        // ---------------------------------------------------------------------------------
         function canPlaceRemaining(demand, freeCap, forbidden, chunkIds, fromIdx, excludedNow, playerIds, exact = true) {
-            // Max-flow: source -> player (demand) -> chunk (1, if allowed) -> sink (capacity)
             const chunkList = [];
             for (let j = fromIdx; j < chunkIds.length; j++) chunkList.push(j);
             let needed = 0; playerIds.forEach(id => { needed += demand[id]; });
@@ -926,11 +922,10 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
             if (exact ? needed !== supply : needed > supply) return false;
             if (needed === 0) return true;
 
-            const matchedTo = {};           // chunk j -> array of player ids assigned in the flow
+            const matchedTo = {};
             chunkList.forEach(j => { matchedTo[j] = []; });
             const allowed = (id, j) => !forbidden[j].has(id) && !(j === fromIdx && excludedNow.has(id));
 
-            // Unit-capacity augmenting paths (needs are tiny: <= ~10 players x 8 chunks)
             function tryAugment(id, seen) {
                 for (const j of chunkList) {
                     if (!allowed(id, j) || seen.has(j)) continue;
@@ -938,7 +933,6 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
                     if (matchedTo[j].length < freeCap[j]) { matchedTo[j].push(id); return true; }
                     for (let k = 0; k < matchedTo[j].length; k++) {
                         const other = matchedTo[j][k];
-                        // `other` must be able to re-route elsewhere
                         matchedTo[j][k] = id;
                         if (reroute(other, seen, j)) return true;
                         matchedTo[j][k] = other;
@@ -961,10 +955,8 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
                 }
                 return false;
             }
-            // each player needs `demand` distinct chunks: add one unit at a time
             for (const id of playerIds) {
                 for (let u = 0; u < demand[id]; u++) {
-                    // a player can't take the same chunk twice
                     const seen = new Set();
                     chunkList.forEach(j => { if (matchedTo[j].includes(id)) seen.add(j); });
                     if (!tryAugment(id, seen)) return false;
@@ -985,8 +977,7 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
                 priorTotal[p.id] = (p.priorMinutes.G || 0) + (p.priorMinutes.D || 0) + (p.priorMinutes.M || 0) + (p.priorMinutes.F || 0);
             });
 
-            // 1. Forced blocks
-            const forbidden = chunks.map(() => new Set());       // forced (player, chunk) pairs
+            const forbidden = chunks.map(() => new Set());
             const hasGoalieAhead = {};
             const forcedMinutes = {}, forcedCount = {};
             playerIds.forEach(id => { forcedMinutes[id] = 0; forcedCount[id] = 0; hasGoalieAhead[id] = 0; });
@@ -1001,23 +992,18 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
             const freeCap = chunks.map((c, j) => Math.max(0, 6 - forbidden[j].size));
             const freeBlocks = freeCap.reduce((a, b) => a + b, 0);
 
-            // A free block is worth the length of the chunk it lands in. Weight by open slots, so a
-            // partial chunk that is already fully forced (live lineup) doesn't shorten the free blocks.
             const avgDur = freeBlocks > 0
                 ? chunks.reduce((a, c, j) => a + freeCap[j] * c.duration, 0) / freeBlocks
                 : 0;
 
-            // A player can only be given a free block in a chunk where they are not already forced
-            // AND that still has an open slot (not "N chunks"; a full partial chunk is closed to them).
             const maxFree = {};
             playerIds.forEach(id => {
                 maxFree[id] = chunks.filter((c, j) => !forbidden[j].has(id) && freeCap[j] > 0).length;
             });
 
-            // 2. Hand out the remaining blocks one at a time to the player with the fewest minutes
             const given = {};
             playerIds.forEach(id => { given[id] = 0; });
-            const full = new Set();   // players who can't take another block without breaking placement
+            const full = new Set();
             for (let b = 0; b < freeBlocks; b++) {
                 const eligible = playerIds.filter(id => given[id] < maxFree[id] && !full.has(id));
                 eligible.sort((a, c) => {
@@ -1030,15 +1016,13 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
                 let handedOut = false;
                 for (const id of eligible) {
                     given[id]++;
-                    // Is there still room in the chunks open to this player (and everyone else's blocks)?
                     if (canPlaceRemaining(given, freeCap, forbidden, chunkIds, 0, new Set(), playerIds, false)) { handedOut = true; break; }
                     given[id]--;
-                    full.add(id);     // only gets harder as others take blocks, so they are done
+                    full.add(id);
                 }
                 if (!handedOut) return null;
             }
 
-            // 3. Placement
             const demand = { ...given };
             if (!canPlaceRemaining(demand, freeCap, forbidden, chunkIds, 0, new Set(), playerIds)) return null;
 
@@ -1051,8 +1035,8 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
                     .filter(id => !forbidden[j].has(id) && demand[id] > 0)
                     .sort((a, c) => {
                         const pa = prev.has(a) ? 1 : 0, pc = prev.has(c) ? 1 : 0;
-                        if (pa !== pc) return pc - pa;                             // same players as the first half
-                        if (demand[a] !== demand[c]) return demand[c] - demand[a];  // biggest remaining need
+                        if (pa !== pc) return pc - pa;
+                        if (demand[a] !== demand[c]) return demand[c] - demand[a];
                         return a.localeCompare(c);
                     });
                 for (const id of candidates) {
@@ -1070,7 +1054,6 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
                 freeCap[j] = 0;
             }
 
-            // Output in the same shape as before
             const futureMinutesMap = {}, totalMinutesMap = {}, minutesAlreadyPlayed = {};
             playerIds.forEach(id => { futureMinutesMap[id] = 0; minutesAlreadyPlayed[id] = priorTotal[id]; });
             chunks.forEach(c => chunkPlayers[c.id].forEach(id => { futureMinutesMap[id] += c.duration; }));
@@ -1094,7 +1077,6 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
             return fallback;
         }
 
-        // STAGE 3: Quarter-by-Quarter Greedy Goalie Allocation with Exclusivity & Future Constraints
         function allocateGoalies(payload, stage2Output) {
             let quartersMap = {};
             payload.remainingChunks.forEach(chunk => {
@@ -1110,7 +1092,6 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
             let goalieMinutesMap = {};
             payload.roster.forEach(p => { goalieMinutesMap[p.id] = p.priorMinutes.G || 0; });
 
-            // 1. Add explicitly constrained goalie minutes from stage 1 constraints
             payload.constraints.forEach(c => {
                 if (c.position === 'G') {
                     const chunkObj = payload.remainingChunks.find(ch => ch.id === c.chunkId);
@@ -1121,7 +1102,6 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
             });
 
             quarterBlocks.forEach(qb => {
-                // Check if any chunk in this quarter has an explicit goalie constraint
                 let constrainedPlayerId = null;
                 qb.chunks.forEach(chunk => {
                     const constraint = payload.constraints.find(c => c.chunkId === chunk.id && c.position === 'G');
@@ -1130,11 +1110,9 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
 
                 if (constrainedPlayerId) {
                     goalieAssignments[qb.quarter] = constrainedPlayerId;
-                    // Already accounted for above, but ensure tally is updated if dynamic
                     return;
                 }
 
-                // 2. Exclusivity Check: Identify players forced to play an outfield position in ANY chunk of this quarter
                 let excludedPlayerIds = new Set();
                 qb.chunks.forEach(chunk => {
                     payload.constraints.forEach(c => {
@@ -1144,19 +1122,13 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
                     });
                 });
 
-                // 3. Build Candidates with Multi-Tier Sorting Tuple
                 let candidates = payload.roster
-                    .filter(p => !excludedPlayerIds.has(p.id)) // Exclude players forced elsewhere in this quarter
+                    .filter(p => !excludedPlayerIds.has(p.id))
                     .map(p => {
                         const futureMins = stage2Output.requiredFutureMinutes[p.id] || 0;
                         const totalGoalieMins = goalieMinutesMap[p.id] || 0;
                         const isWilling = p.goaliePref !== 'refuses';
 
-                        // Eligibility Tiers:
-                        // Tier 0: Willing, < 24 goalie mins, future mins >= 12
-                        // Tier 1: Willing, < 24 goalie mins, future mins < 12 (relaxed rule)
-                        // Tier 2: Refuses, < 24 goalie mins
-                        // Tier 3: >= 24 goalie mins (cap reached)
                         let eligibilityTier = 3;
                         if (isWilling && totalGoalieMins < 24 && futureMins >= 12) {
                             eligibilityTier = 0;
@@ -1179,7 +1151,6 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
                         };
                     });
 
-                // If all players are excluded for this quarter (edge case), fallback to roster minus explicit hard blockers
                 if (candidates.length === 0) {
                     candidates = payload.roster.map(p => ({
                         player: p,
@@ -1238,9 +1209,7 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
             
             renderChunks(chunks);
 
-            // Stage 1: Payload & Base Constraints
             const stage1Payload = buildPipelinePayload();
-            // Stage 0: fill blank other-half-of-quarter slots from forced allocations
             propagateConstraintsWithinQuarter(stage1Payload);
             
             const badge = document.getElementById('error-badge');
@@ -1249,7 +1218,6 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
 
             document.getElementById('json-stage1-container').innerText = JSON.stringify(stage1Payload, null, 2);
 
-            // Hard rule: short chunks must be fully assigned, otherwise stop here.
             const ruleBanner = document.getElementById('rule-banner');
             const ruleProblems = checkPartialChunksFullyAssigned(stage1Payload);
             if (ruleProblems.length > 0) {
@@ -1264,14 +1232,10 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
             }
             ruleBanner.classList.add('hidden');
 
-            // Stage 2: Initial Greedy Minute Balance (to establish baseline future minutes)
             const stage2Output = greedyBalanceMinutes(stage1Payload, stage1Payload.constraints);
-
-            // Stage 3: Goalie Allocation (Quarter-by-quarter with exclusivity filters & future constraint tallies)
             const stage3Output = allocateGoalies(stage1Payload, stage2Output);
             document.getElementById('json-stage3-container').innerText = JSON.stringify(stage3Output, null, 2);
 
-            // Stage 4: Add Goalie Assignments as Constraints & Re-run Minute Balancing
             let stage4Constraints = [...stage1Payload.constraints];
             
             chunks.forEach(chunk => {
@@ -1295,14 +1259,12 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
             stage4Output.appliedConstraints = stage4Constraints;
             document.getElementById('json-stage4-container').innerText = JSON.stringify(stage4Output, null, 2);
         
-            // Stage 5: Defense / Offense / Flex allocation of the field minutes Stage 4 gave each player
             const stage5Output = allocatePositionCategories(stage4Output, stage1Payload, chunks, stage4Constraints);
             document.getElementById('json-stage5-container').innerText = JSON.stringify(stage5Output.json, null, 2);
             renderPlayerSummaryReport(stage5Output);
             renderStage5Visual(stage5Output);
         }
 
-        // Initial render
         renderRoster();
         renderManualConstraints();
         recalculateAll();
