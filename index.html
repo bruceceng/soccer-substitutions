@@ -596,26 +596,79 @@ const timbresRoster = [
 function allocatePositionCategories(stage4Output, payload, chunks, constraints) {
             const warnings = [];
             const stats = {};
-            
-            const prioritizeBalancedDefense = payload.prioritizeBalancedDefense !== false; 
+
+            const prioritizeBalancedDefense = payload.prioritizeBalancedDefense !== false;
+            const defenseDebug = true;
+            const dlog = (label, data) => {
+                if (!defenseDebug) return;
+
+                // Do not rely on Chrome's collapsed object/array preview. Emit each
+                // debug record as one complete string so the console contains the
+                // exact candidate lists / rejection reasons that can be pasted back.
+                let rendered = '';
+                try {
+                    rendered = data === undefined
+                        ? ''
+                        : JSON.stringify(data, null, 2);
+                } catch (err) {
+                    rendered = `[debug JSON stringify failed: ${err?.message || err}]`;
+                }
+
+                console.log(rendered ? `${label} ${rendered}` : label);
+            };
 
             payload.roster.forEach(p => {
                 const pr = p.priorMinutes;
                 stats[p.id] = {
                     name: p.name,
                     playedSoFar: (pr.G || 0) + (pr.D || 0) + (pr.M || 0) + (pr.F || 0),
-                    G: pr.G || 0, D: pr.D || 0, O: (pr.M || 0) + (pr.F || 0), Flex: 0,
+                    G: pr.G || 0,
+                    D: pr.D || 0,
+                    O: (pr.M || 0) + (pr.F || 0),
+                    Flex: 0,
                     futureMinutes: 0,
                     pending: 0
                 };
             });
 
+            // buildPipelinePayload intentionally carries only the scheduling fields, so the
+            // skill ratings are not guaranteed to be present on payload.roster. Stage 5 must
+            // therefore fall back to the canonical timbresRoster entry by player id.
+            const getCanonicalPlayer = id => {
+                const payloadPlayer = payload.roster.find(p => p.id === id);
+                const rosterPlayer = timbresRoster.find(p => p.id === id);
+                return {
+                    payloadPlayer,
+                    rosterPlayer,
+                    player: payloadPlayer || rosterPlayer
+                };
+            };
+
             const getPlayerScore = (playerObj, slot) => {
                 if (!playerObj) return 1;
-                if (slot.startsWith('D')) return playerObj.defScore !== undefined ? playerObj.defScore : 1;
-                if (slot.startsWith('M')) return playerObj.midScore !== undefined ? playerObj.midScore : 1;
-                if (slot === 'F') return playerObj.fwdScore !== undefined ? playerObj.fwdScore : 1;
+
+                // Prefer the score carried by the object passed in. If payload.roster does
+                // not contain ratings, use the canonical roster record as the fallback.
+                let source = playerObj;
+                if (slot.startsWith('D') && source.defScore === undefined) {
+                    source = timbresRoster.find(p => p.id === playerObj.id) || source;
+                } else if (slot.startsWith('M') && source.midScore === undefined) {
+                    source = timbresRoster.find(p => p.id === playerObj.id) || source;
+                } else if (slot === 'F' && source.fwdScore === undefined) {
+                    source = timbresRoster.find(p => p.id === playerObj.id) || source;
+                }
+
+                if (slot.startsWith('D')) return source.defScore !== undefined ? source.defScore : 1;
+                if (slot.startsWith('M')) return source.midScore !== undefined ? source.midScore : 1;
+                if (slot === 'F') return source.fwdScore !== undefined ? source.fwdScore : 1;
                 return 1;
+            };
+
+            const getPlayerById = id => payload.roster.find(p => p.id === id) || timbresRoster.find(p => p.id === id);
+            const getDefenseSkill = id => getPlayerScore(getPlayerById(id), 'D');
+            const getDefenseSkillSource = id => {
+                const payloadPlayer = payload.roster.find(p => p.id === id);
+                return payloadPlayer && payloadPlayer.defScore !== undefined ? 'payload' : 'timbresRoster';
             };
 
             const quarterMap = {};
@@ -644,10 +697,12 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
                         stats[id].G += chunk.duration;
                     } else if (c && c.position.startsWith('D')) {
                         cells[id] = { role: 'D', locked: true, position: c.position, starred: isDirectConstraint(c) };
-                        stats[id].D += chunk.duration; lockedD++;
+                        stats[id].D += chunk.duration;
+                        lockedD++;
                     } else if (c) {
                         cells[id] = { role: 'O', locked: true, position: c.position, starred: isDirectConstraint(c) };
-                        stats[id].O += chunk.duration; lockedO++;
+                        stats[id].O += chunk.duration;
+                        lockedO++;
                     } else {
                         cells[id] = { role: null, locked: false };
                         stats[id].pending += chunk.duration;
@@ -664,11 +719,14 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
                 if (!goalieC) warnings.push(`${chunk.id}: no goalie assigned.`);
 
                 return {
-                    chunk, cells,
+                    chunk,
+                    cells,
                     slotsLeft: {
                         D: Math.max(0, DEFENSE_SLOTS - lockedD),
                         O: Math.max(0, OFFENSE_SLOTS - lockedO)
-                    }
+                    },
+                    lockedDefenseCount: lockedD,
+                    autoDefenseAssignments: 0
                 };
             });
 
@@ -680,43 +738,357 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
                 }
             });
 
+            const getFilledDefenseSlots = g => DEFENSE_SLOTS - g.slotsLeft.D;
+            const getNextDefenseSlotNumber = g => {
+                const filled = getFilledDefenseSlots(g);
+                return filled < DEFENSE_SLOTS ? filled + 1 : null;
+            };
+
+            const missingPayloadSkillRatings = payload.roster.filter(p => p.defScore === undefined).map(p => p.id);
+            if (missingPayloadSkillRatings.length > 0) {
+                dlog('[Stage5][Defense] SCORE FALLBACK', {
+                    message: 'payload.roster does not carry defScore for these players; Stage 5 is using timbresRoster by id.',
+                    players: missingPayloadSkillRatings
+                });
+            }
+
+            dlog('[Stage5][Defense] START', {
+                prioritizeBalancedDefense,
+                defenseSlots: DEFENSE_SLOTS,
+                fullQuarterPairCount: fullQuarterPairs.length,
+                players: payload.roster.map(p => ({
+                    id: p.id,
+                    name: p.name,
+                    defScore: getDefenseSkill(p.id),
+                    defScoreSource: getDefenseSkillSource(p.id),
+                    priorDefense: p.priorMinutes?.D || 0,
+                    futureMinutes: stats[p.id].futureMinutes,
+                    pendingMinutes: stats[p.id].pending,
+                    currentPosition: p.currentPosition || null
+                })),
+                chunks: grid.map(g => ({
+                    chunkId: g.chunk.id,
+                    quarter: g.chunk.quarter,
+                    duration: g.chunk.duration,
+                    fielded: Object.keys(g.cells).filter(id => g.cells[id].role !== 'Bench'),
+                    lockedDefense: Object.keys(g.cells).filter(id => g.cells[id].role === 'D' && g.cells[id].locked),
+                    filledDefenseSlots: getFilledDefenseSlots(g)
+                }))
+            });
+
+            const candidateInfo = (id, g, slotNumber, requireNoDefense, fullQuarterBlockDuration = null) => {
+                const cell = g.cells[id];
+                const reasons = [];
+                if (!cell || cell.role !== null) reasons.push(cell?.role === 'Bench' ? 'not-fielded' : `role=${cell?.role || 'unknown'}`);
+                if (cell?.locked) reasons.push('locked');
+                if (stats[id].pending < (fullQuarterBlockDuration ?? g.chunk.duration)) {
+                    reasons.push(`pending<${fullQuarterBlockDuration ?? g.chunk.duration}`);
+                }
+                if (requireNoDefense && stats[id].D !== 0) reasons.push(`already-defense=${stats[id].D}`);
+
+                return {
+                    id,
+                    name: stats[id].name,
+                    defScore: getDefenseSkill(id),
+                    defenseMinutes: stats[id].D,
+                    pendingMinutes: stats[id].pending,
+                    eligible: reasons.length === 0,
+                    reason: reasons.length ? reasons.join(', ') : 'eligible',
+                    slotNumber,
+                    chunkId: g.chunk.id,
+                    quarter: g.chunk.quarter
+                };
+            };
+
+            const compareDefenseCandidates = (a, b, slotNumber) => {
+                if (!b) return true;
+
+                // 1. Defense minutes are always the primary balancing criterion.
+                if (stats[a.id].D !== stats[b.id].D) {
+                    return stats[a.id].D < stats[b.id].D;
+                }
+
+                // 2. On equal defense minutes, spread defender quality within the quarter:
+                //    slot 1 -> strongest defender; slot 2 -> weakest defender.
+                if (prioritizeBalancedDefense) {
+                    const aSkill = getDefenseSkill(a.id);
+                    const bSkill = getDefenseSkill(b.id);
+                    if (aSkill !== bSkill) {
+                        return slotNumber === 1 ? aSkill > bSkill : aSkill < bSkill;
+                    }
+                }
+
+                // 3. Give preference to the player who still has more unassigned field minutes.
+                if (stats[a.id].pending !== stats[b.id].pending) {
+                    return stats[a.id].pending > stats[b.id].pending;
+                }
+
+                return String(a.id).localeCompare(String(b.id)) < 0;
+            };
+
+            const selectBestCandidateForUnit = (candidateIds, slotNumber, unitLabel) => {
+                let best = null;
+                candidateIds.forEach(id => {
+                    const candidate = { id, unitLabel };
+                    if (compareDefenseCandidates(candidate, best, slotNumber)) best = candidate;
+                });
+                return best;
+            };
+
+            const assignDefense = (g, id, assignmentLabel) => {
+                g.cells[id] = { role: 'D', locked: false };
+                stats[id].D += g.chunk.duration;
+                stats[id].pending -= g.chunk.duration;
+                g.slotsLeft.D--;
+                g.autoDefenseAssignments++;
+
+                dlog('[Stage5][Defense] ASSIGN', {
+                    chunkId: g.chunk.id,
+                    quarter: g.chunk.quarter,
+                    duration: g.chunk.duration,
+                    id,
+                    name: stats[id].name,
+                    physicalSlotNumber: getFilledDefenseSlots(g),
+                    assignmentLabel,
+                    defenseMinutesAfter: stats[id].D,
+                    pendingMinutesAfter: stats[id].pending
+                });
+            };
+
+            const allocateDefense = () => {
+                // =============================================================
+                // PHASE 1: FULL-QUARTER DEFENSE FOR PLAYERS WITH ZERO DEFENSE
+                // =============================================================
+                // The important change: every quarter has a LOCAL next-slot number.
+                // We never run "all slot 1s globally, then all slot 2s globally".
+                // For each available quarter, we determine whether its next physical
+                // defense slot is #1 or #2 and apply the corresponding tie-breaker.
+                let changed = true;
+                while (changed) {
+                    changed = false;
+                    const unitOptions = [];
+
+                    fullQuarterPairs.forEach(pair => {
+                        const [g1, g2] = pair;
+                        const filled1 = getFilledDefenseSlots(g1);
+                        const filled2 = getFilledDefenseSlots(g2);
+
+                        // A full-quarter player has to fill the same physical defense slot
+                        // in both halves. If the halves are already at different slot counts,
+                        // this quarter waits for the half-chunk phase.
+                        if (filled1 !== filled2) return;
+                        if (filled1 >= DEFENSE_SLOTS || filled2 >= DEFENSE_SLOTS) return;
+
+                        const slotNumber = filled1 + 1;
+                        const blockDuration = g1.chunk.duration + g2.chunk.duration;
+                        const eligiblePlayers = Object.keys(g1.cells).filter(id => {
+                            const a = candidateInfo(id, g1, slotNumber, true, blockDuration);
+                            const b = candidateInfo(id, g2, slotNumber, true, blockDuration);
+                            return a.eligible && b.eligible;
+                        });
+
+                        const diagnostics = Object.keys(g1.cells).map(id => {
+                            const a = candidateInfo(id, g1, slotNumber, true, blockDuration);
+                            const b = candidateInfo(id, g2, slotNumber, true, blockDuration);
+                            return {
+                                id,
+                                name: stats[id].name,
+                                defScore: getDefenseSkill(id),
+                                defScoreSource: getDefenseSkillSource(id),
+                                defenseMinutes: stats[id].D,
+                                pendingMinutes: stats[id].pending,
+                                eligibleBothHalves: a.eligible && b.eligible,
+                                q1: a.reason,
+                                q2: b.reason
+                            };
+                        });
+
+                        dlog('[Stage5][Defense][FullQ] UNIT', {
+                            quarter: g1.chunk.quarter,
+                            chunks: [g1.chunk.id, g2.chunk.id],
+                            slotNumber,
+                            blockDuration,
+                            candidateCount: eligiblePlayers.length,
+                            candidates: eligiblePlayers.map(id => ({
+                                id,
+                                name: stats[id].name,
+                                defScore: getDefenseSkill(id),
+                                defScoreSource: getDefenseSkillSource(id),
+                                defenseMinutes: stats[id].D,
+                                pendingMinutes: stats[id].pending
+                            })),
+                            diagnostics
+                        });
+
+                        if (eligiblePlayers.length > 0) {
+                            const selected = selectBestCandidateForUnit(
+                                eligiblePlayers,
+                                slotNumber,
+                                `Q${g1.chunk.quarter}`
+                            );
+                            unitOptions.push({
+                                pair,
+                                quarter: g1.chunk.quarter,
+                                slotNumber,
+                                selected
+                            });
+                        }
+                    });
+
+                    if (unitOptions.length === 0) break;
+
+                    // Preserve global minute balancing between the available full-quarter units,
+                    // but compare each unit using its already-correct local slot tie-break direction.
+                    unitOptions.sort((a, b) => {
+                        const aid = a.selected.id;
+                        const bid = b.selected.id;
+                        if (stats[aid].D !== stats[bid].D) return stats[aid].D - stats[bid].D;
+
+                        if (a.slotNumber !== b.slotNumber) {
+                            // Do not let a #2 slot displace a #1 slot on skill alone; the slot
+                            // priority has already been evaluated within each quarter.
+                            return a.quarter - b.quarter;
+                        }
+
+                        const aSkill = getDefenseSkill(aid);
+                        const bSkill = getDefenseSkill(bid);
+                        if (aSkill !== bSkill) {
+                            return a.slotNumber === 1 ? bSkill - aSkill : aSkill - bSkill;
+                        }
+
+                        if (stats[aid].pending !== stats[bid].pending) {
+                            return stats[bid].pending - stats[aid].pending;
+                        }
+                        return String(aid).localeCompare(String(bid));
+                    });
+
+                    const chosen = unitOptions[0];
+                    const [g1, g2] = chosen.pair;
+
+                    dlog('[Stage5][Defense][FullQ] SELECTED', {
+                        quarter: chosen.quarter,
+                        slotNumber: chosen.slotNumber,
+                        selected: {
+                            id: chosen.selected.id,
+                            name: stats[chosen.selected.id].name,
+                            defScore: getDefenseSkill(chosen.selected.id),
+                            defScoreSource: getDefenseSkillSource(chosen.selected.id),
+                            defenseMinutes: stats[chosen.selected.id].D,
+                            pendingMinutes: stats[chosen.selected.id].pending
+                        }
+                    });
+
+                    assignDefense(g1, chosen.selected.id, `FULL_Q_${chosen.slotNumber}`);
+                    assignDefense(g2, chosen.selected.id, `FULL_Q_${chosen.slotNumber}`);
+                    changed = true;
+                }
+
+                // =============================================================
+                // PHASE 2: INDIVIDUAL / HALF-QUARTER DEFENSE
+                // =============================================================
+                // Keep filling required defense slots. The local physical slot number
+                // determines whether equal-D ties use best or worst defender.
+                let changedIndividuals = true;
+                while (changedIndividuals) {
+                    changedIndividuals = false;
+                    const unitOptions = [];
+
+                    grid.forEach(g => {
+                        if (g.slotsLeft.D <= 0) return;
+
+                        const slotNumber = getNextDefenseSlotNumber(g);
+                        if (!slotNumber) return;
+
+                        const diagnostics = Object.keys(g.cells).map(id => candidateInfo(id, g, slotNumber, false));
+                        const eligiblePlayers = diagnostics.filter(d => d.eligible).map(d => d.id);
+
+                        dlog('[Stage5][Defense][Chunk] UNIT', {
+                            chunkId: g.chunk.id,
+                            quarter: g.chunk.quarter,
+                            duration: g.chunk.duration,
+                            slotNumber,
+                            candidateCount: eligiblePlayers.length,
+                            candidates: diagnostics
+                        });
+
+                        if (eligiblePlayers.length > 0) {
+                            const selected = selectBestCandidateForUnit(
+                                eligiblePlayers,
+                                slotNumber,
+                                g.chunk.id
+                            );
+                            unitOptions.push({
+                                g,
+                                quarter: g.chunk.quarter,
+                                slotNumber,
+                                selected
+                            });
+                        }
+                    });
+
+                    if (unitOptions.length === 0) break;
+
+                    unitOptions.sort((a, b) => {
+                        const aid = a.selected.id;
+                        const bid = b.selected.id;
+                        if (stats[aid].D !== stats[bid].D) return stats[aid].D - stats[bid].D;
+
+                        // Once minutes are tied, the local slot tie-break remains authoritative.
+                        const aSkill = getDefenseSkill(aid);
+                        const bSkill = getDefenseSkill(bid);
+                        if (aSkill !== bSkill) {
+                            return a.slotNumber === 1 ? bSkill - aSkill : aSkill - bSkill;
+                        }
+
+                        if (stats[aid].pending !== stats[bid].pending) {
+                            return stats[bid].pending - stats[aid].pending;
+                        }
+                        if (a.quarter !== b.quarter) return a.quarter - b.quarter;
+                        return String(aid).localeCompare(String(bid));
+                    });
+
+                    const chosen = unitOptions[0];
+                    dlog('[Stage5][Defense][Chunk] SELECTED', {
+                        chunkId: chosen.g.chunk.id,
+                        quarter: chosen.g.chunk.quarter,
+                        slotNumber: chosen.slotNumber,
+                        selected: {
+                            id: chosen.selected.id,
+                            name: stats[chosen.selected.id].name,
+                            defScore: getDefenseSkill(chosen.selected.id),
+                            defScoreSource: getDefenseSkillSource(chosen.selected.id),
+                            defenseMinutes: stats[chosen.selected.id].D,
+                            pendingMinutes: stats[chosen.selected.id].pending
+                        }
+                    });
+
+                    assignDefense(chosen.g, chosen.selected.id, `CHUNK_${chosen.slotNumber}`);
+                    changedIndividuals = true;
+                }
+            };
+
             const allocateRole = (role, slotsKey) => {
-                const isBetterCandidate = (candidateId, currentBestId, chunkOrPair) => {
+                if (role === 'D') {
+                    allocateDefense();
+                    return;
+                }
+
+                const isBetterCandidate = (candidateId, currentBestId) => {
                     if (!currentBestId) return true;
-                    
-                    // 1. Prioritize lower minutes in category
                     if (stats[candidateId][slotsKey] !== stats[currentBestId][slotsKey]) {
                         return stats[candidateId][slotsKey] < stats[currentBestId][slotsKey];
                     }
-                    
-                    // 2. Balanced defense tie-breaker
-                    if (role === 'D' && prioritizeBalancedDefense) {
-                        const slotsLeft = Array.isArray(chunkOrPair) ? chunkOrPair[0].slotsLeft.D : chunkOrPair.slotsLeft.D;
-                        
-                        const candP = payload.roster.find(p => p.id === candidateId);
-                        const bestP = payload.roster.find(p => p.id === currentBestId);
-                        const candSkill = getPlayerScore(candP, 'D'); 
-                        const bestSkill = getPlayerScore(bestP, 'D');
-                        
-                        if (candSkill !== bestSkill) {
-                            return slotsLeft >= 2 ? (candSkill > bestSkill) : (candSkill < bestSkill);
-                        }
-                    }
-
-                    // 3. Prioritize higher pending total minutes
                     if (stats[candidateId].pending !== stats[currentBestId].pending) {
                         return stats[candidateId].pending > stats[currentBestId].pending;
                     }
-                    
-                    return false;
+                    return String(candidateId).localeCompare(String(currentBestId)) < 0;
                 };
 
-                // 1. Prioritize full quarters for pairs where the player is freely available in both chunks
                 let keepGoingPairs = true;
                 while (keepGoingPairs) {
                     keepGoingPairs = false;
                     let bestCandidate = null;
-                    
+
                     fullQuarterPairs.forEach(pair => {
                         const [g1, g2] = pair;
                         if (g1.slotsLeft[slotsKey] > 0 && g2.slotsLeft[slotsKey] > 0) {
@@ -726,9 +1098,9 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
                                               g2.cells[id].role === null && !g2.cells[id].locked)
                                 .filter(id => stats[id].pending >= blockDuration)
                                 .filter(id => stats[id][slotsKey] === 0);
-                                
+
                             eligiblePlayers.forEach(id => {
-                                if (isBetterCandidate(id, bestCandidate ? bestCandidate.id : null, pair)) {
+                                if (isBetterCandidate(id, bestCandidate ? bestCandidate.id : null)) {
                                     bestCandidate = { id, pair };
                                 }
                             });
@@ -747,21 +1119,20 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
                     }
                 }
 
-                // 2. Fallback to individual chunks globally where the player is freely available
                 let keepGoingIndividuals = true;
                 while (keepGoingIndividuals) {
                     keepGoingIndividuals = false;
                     let bestCandidate = null;
-                    
+
                     grid.forEach(g => {
                         if (g.slotsLeft[slotsKey] > 0) {
                             const dur = g.chunk.duration;
                             const eligiblePlayers = Object.keys(g.cells)
                                 .filter(id => g.cells[id].role === null && !g.cells[id].locked)
                                 .filter(id => stats[id].pending >= dur);
-                                
+
                             eligiblePlayers.forEach(id => {
-                                if (isBetterCandidate(id, bestCandidate ? bestCandidate.id : null, g)) {
+                                if (isBetterCandidate(id, bestCandidate ? bestCandidate.id : null)) {
                                     bestCandidate = { id, g };
                                 }
                             });
@@ -791,6 +1162,21 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
                     }
                 });
             });
+
+            dlog('[Stage5][Defense] COMPLETE BEFORE SUBPOS', grid.map(g => ({
+                chunkId: g.chunk.id,
+                quarter: g.chunk.quarter,
+                physicalDefenseSlotsFilled: getFilledDefenseSlots(g),
+                autoDefenseAssignments: g.autoDefenseAssignments,
+                defense: Object.keys(g.cells)
+                    .filter(id => g.cells[id].role === 'D' || g.cells[id].role === 'D_SUB')
+                    .map(id => ({
+                        id,
+                        name: stats[id].name,
+                        locked: !!g.cells[id].locked,
+                        position: g.cells[id].position || null
+                    }))
+            })));
 
             // PASS 6A: Defense Sub-Position Optimization (D_L, D_R)
             const defenseSlots = ['D_L', 'D_R'];
@@ -826,7 +1212,7 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
                         g.cells[playerId] = { role: 'D_SUB', locked: g.cells[playerId].locked, position: finalSubPos };
                     });
                 }
-                
+
                 Object.keys(g.cells).forEach(id => {
                     if (g.cells[id].role === 'D') {
                         if (!g.cells[id].position) g.cells[id].position = 'D_L';
@@ -839,7 +1225,7 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
             const offensiveSlots = ['M_L', 'M_R', 'F'];
             grid.forEach(g => {
                 const oPlayerIds = Object.keys(g.cells).filter(id => g.cells[id].role === 'O' && !g.cells[id].locked);
-                
+
                 if (oPlayerIds.length === 3) {
                     const permute = (arr) => {
                         if (arr.length <= 1) return [arr];
@@ -873,7 +1259,7 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
                         g.cells[playerId] = { role: roleGroup, locked: g.cells[playerId].locked, position: finalSubPos };
                     });
                 }
-                
+
                 Object.keys(g.cells).forEach(id => {
                     if (g.cells[id].role === 'O') {
                         if (!g.cells[id].position) g.cells[id].position = 'M_L';
@@ -917,7 +1303,10 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
                         playedSoFar: s.playedSoFar,
                         remaining: s.futureMinutes,
                         projectedTotal: s.playedSoFar + s.futureMinutes,
-                        G: s.G, D: s.D, O: s.O, Flex: s.Flex
+                        G: s.G,
+                        D: s.D,
+                        O: s.O,
+                        Flex: s.Flex
                     }];
                 })),
                 warnings
@@ -926,7 +1315,7 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
             grid = runStage6ConsistencyPass(grid, payload);
 
             return { grid, stats, roster: payload.roster, warnings, json };
-        }      
+        }
         function renderPlayerSummaryReport(stage5) {
             let container = document.getElementById('stage5-player-summary');
             if (!container) return;
