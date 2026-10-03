@@ -11,29 +11,21 @@
         }
     </style>
 </head>
-<body class="bg-slate-900 text-slate-100 font-sans min-h-screen p-3 sm:p-6">
-    <div class="max-w-6xl mx-auto space-y-6">
-        
-        <!-- Header Section -->
-        <header class="border-b border-slate-800 pb-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
-            <div>
-                <h1 class="text-2xl font-bold text-emerald-400">Portland Timbers U8</h1>
-                <p class="text-sm text-slate-400">Macro-Allocation: Exclusivity Filters, Goalie Assignment & Re-balanced Minutes</p>
-            </div>
-        </header>
+<body class="bg-slate-900 text-slate-100 font-sans min-h-screen p-2 sm:p-6">
+    <div class="max-w-6xl mx-auto space-y-3 sm:space-y-6">
 
         <!-- Rule Conflict / Partial Allocation Warning Banner -->
-        <div id="rule-banner" class="hidden text-sm bg-rose-950/60 border border-rose-700 text-rose-200 rounded-lg p-3"></div>
+        <div id="rule-banner" class="hidden text-xs sm:text-sm bg-rose-950/60 border border-rose-700 text-rose-200 rounded-lg p-2.5"></div>
 
         <!-- Navigation Tabs -->
-        <div class="flex border-b border-slate-800 space-x-2 overflow-x-auto pb-1 sm:pb-0">
-            <button onclick="switchTab('setup')" data-tab="setup" class="tab-btn px-4 py-2 text-sm font-semibold border-b-2 border-emerald-500 text-emerald-400 bg-slate-800 rounded-t-lg transition whitespace-nowrap">
+        <div class="flex border-b border-slate-800 space-x-1 sm:space-x-2 overflow-x-auto pb-1 sm:pb-0">
+            <button onclick="switchTab('setup')" data-tab="setup" class="tab-btn px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-semibold border-b-2 border-emerald-500 text-emerald-400 bg-slate-800 rounded-t-lg transition whitespace-nowrap">
                 Setup
             </button>
-            <button onclick="switchTab('lineup')" data-tab="lineup" class="tab-btn px-4 py-2 text-sm font-semibold border-b-2 border-transparent text-slate-400 hover:text-slate-200 rounded-t-lg transition whitespace-nowrap">
+            <button onclick="switchTab('lineup')" data-tab="lineup" class="tab-btn px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-semibold border-b-2 border-transparent text-slate-400 hover:text-slate-200 rounded-t-lg transition whitespace-nowrap">
                 Lineup
             </button>
-            <button id="calc-tab-btn" onclick="switchTab('calculations')" data-tab="calculations" class="tab-btn hidden px-4 py-2 text-sm font-semibold border-b-2 border-transparent text-amber-400 hover:text-amber-300 bg-amber-950/30 rounded-t-lg transition whitespace-nowrap">
+            <button id="calc-tab-btn" onclick="switchTab('calculations')" data-tab="calculations" class="tab-btn hidden px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-semibold border-b-2 border-transparent text-amber-400 hover:text-amber-300 bg-amber-950/30 rounded-t-lg transition whitespace-nowrap">
                 Calculations (Debug)
             </button>
         </div>
@@ -41,49 +33,49 @@
         <!-- =================================================================== -->
         <!-- TAB 1: SETUP -->
         <!-- =================================================================== -->
-        <div id="tab-setup" class="tab-content space-y-6">
+        <div id="tab-setup" class="tab-content space-y-4 sm:space-y-6">
             
             <!-- Game Configuration & Time Control Card -->
-            <div class="bg-slate-800 p-4 sm:p-5 rounded-xl border border-slate-700 shadow-lg grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+            <div class="bg-slate-800 p-3 sm:p-5 rounded-xl border border-slate-700 shadow-lg grid grid-cols-1 md:grid-cols-2 gap-3 items-center">
                 <div>
-                    <label class="block text-sm font-medium text-slate-300 mb-1">Remaining Game Time (Mins)</label>
+                    <label class="block text-xs sm:text-sm font-medium text-slate-300 mb-1">Remaining Game Time (Mins)</label>
                     <input type="number" id="remaining-time" value="48" step="1" min="1" max="48" 
-                        class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-emerald-500 font-bold"
+                        class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 sm:py-2 text-white focus:outline-none focus:border-emerald-500 font-bold text-sm"
                         oninput="recalculateAll()">
                     
-                    <div class="flex items-center gap-2 mt-4 bg-slate-900 p-3 rounded-lg border border-slate-700 w-full">
+                    <div class="flex items-center gap-2 mt-3 bg-slate-900 p-2.5 rounded-lg border border-slate-700 w-full">
                         <input type="checkbox" id="debug-toggle" onchange="toggleDebugMode()" class="w-4 h-4 accent-emerald-500 cursor-pointer">
-                        <label for="debug-toggle" class="text-sm font-medium text-slate-300 cursor-pointer">Debug Mode (Show Calculations Tab)</label>
+                        <label for="debug-toggle" class="text-xs sm:text-sm font-medium text-slate-300 cursor-pointer">Debug Mode (Show Calculations Tab)</label>
                     </div>
                 </div>
-                <div class="text-xs text-slate-400 bg-slate-900 p-3 rounded-lg border border-slate-700">
+                <div class="text-xs text-slate-400 bg-slate-900 p-2.5 rounded-lg border border-slate-700">
                     <span class="font-semibold text-emerald-400">Setup Instructions:</span> Set overall remaining match length, adjust attendance and goalie willingness, record historical position minutes, and add any specific time-chunk position constraints.
                 </div>
             </div>
 
             <!-- Player Roster & Historical Tracking Table -->
             <div class="bg-slate-800 rounded-xl border border-slate-700 shadow-lg overflow-hidden">
-                <div class="p-4 border-b border-slate-700 flex justify-between items-center">
-                    <h2 class="font-semibold text-lg text-white">Roster, Position History & Field Status</h2>
-                    <button onclick="resetPriorMinutes()" class="text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 px-3 py-1.5 rounded transition">
+                <div class="p-3 sm:p-4 border-b border-slate-700 flex justify-between items-center">
+                    <h2 class="font-semibold text-sm sm:text-lg text-white">Roster, Position History & Field Status</h2>
+                    <button onclick="resetPriorMinutes()" class="text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 px-2.5 py-1 rounded transition">
                         Reset Prior Mins
                     </button>
                 </div>
                 <div class="overflow-x-auto">
-                    <table class="w-full text-left border-collapse min-w-[640px]">
+                    <table class="w-full text-left border-collapse min-w-[580px]">
                         <thead>
                             <tr class="bg-slate-900/50 text-slate-400 text-xs uppercase tracking-wider border-b border-slate-700">
-                                <th class="p-3 text-center">Attending</th>
-                                <th class="p-3">Player</th>
-                                <th class="p-3">Goalie Pref</th>
-                                <th class="p-3 text-center">Prior G</th>
-                                <th class="p-3 text-center">Prior D</th>
-                                <th class="p-3 text-center">Prior M</th>
-                                <th class="p-3 text-center">Prior F</th>
-                                <th class="p-3">Current Field Position</th>
+                                <th class="p-2.5 text-center">Attending</th>
+                                <th class="p-2.5">Player</th>
+                                <th class="p-2.5">Goalie Pref</th>
+                                <th class="p-2.5 text-center">Prior G</th>
+                                <th class="p-2.5 text-center">Prior D</th>
+                                <th class="p-2.5 text-center">Prior M</th>
+                                <th class="p-2.5 text-center">Prior F</th>
+                                <th class="p-2.5">Current Field Position</th>
                             </tr>
                         </thead>
-                        <tbody id="roster-table-body" class="divide-y divide-slate-700/50 text-sm">
+                        <tbody id="roster-table-body" class="divide-y divide-slate-700/50 text-xs sm:text-sm">
                             <!-- Populated dynamically via JS -->
                         </tbody>
                     </table>
@@ -91,13 +83,13 @@
             </div>
 
             <!-- Manual Constraints Override Manager -->
-            <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 shadow-lg space-y-4">
+            <div class="bg-slate-800 p-3 sm:p-5 rounded-xl border border-slate-700 shadow-lg space-y-3">
                 <div class="flex justify-between items-center">
                     <div>
-                        <h2 class="font-semibold text-lg text-white">Manual Player Constraints</h2>
-                        <p class="text-xs text-slate-400">Force a player into a specific position for a specific time chunk.</p>
+                        <h2 class="font-semibold text-sm sm:text-lg text-white">Manual Player Constraints</h2>
+                        <p class="text-xs text-slate-400 hidden sm:block">Force a player into a specific position for a specific time chunk.</p>
                     </div>
-                    <button onclick="addManualConstraintRow()" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium px-3 py-2 rounded-lg transition shadow">
+                    <button onclick="addManualConstraintRow()" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium px-2.5 py-1.5 rounded-lg transition shadow">
                         + Add Constraint
                     </button>
                 </div>
@@ -111,22 +103,22 @@
         <!-- =================================================================== -->
         <!-- TAB 2: LINEUP (PRIMARY OUTPUT GRID) -->
         <!-- =================================================================== -->
-        <div id="tab-lineup" class="tab-content hidden space-y-6">
+        <div id="tab-lineup" class="tab-content hidden space-y-4 sm:space-y-6">
             
             <!-- Stage 5 Position Bucket Allocation Output -->
-            <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 shadow-lg flex flex-col space-y-4">
-                <div class="flex justify-between items-center border-b border-slate-700 pb-3">
+            <div class="bg-slate-800 p-3 sm:p-5 rounded-xl border border-slate-700 shadow-lg flex flex-col space-y-3">
+                <div class="flex justify-between items-center border-b border-slate-700 pb-2">
                     <div>
-                        <h2 class="font-semibold text-lg text-white">Lineup Assignment Matrix</h2>
-                        <p class="text-xs text-slate-400">Final period-by-period field lineup & rotations across all positions.</p>
+                        <h2 class="font-semibold text-base sm:text-lg text-white">Lineup Assignment Matrix</h2>
+                        <p class="text-xs text-slate-400 hidden sm:block">Final period-by-period field lineup & rotations across all positions.</p>
                     </div>
-                    <button onclick="switchTab('setup')" class="text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 px-3 py-1.5 rounded transition">
+                    <button onclick="switchTab('setup')" class="text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 px-2.5 py-1 rounded transition">
                         Edit Setup
                     </button>
                 </div>
 
                 <!-- Visual container for DOM rendering -->
-                <div id="stage5-visual-container" class="space-y-4 overflow-x-auto overflow-y-auto max-h-[500px] pr-1">
+                <div id="stage5-visual-container" class="space-y-3 overflow-x-auto pr-1">
                     <!-- Populated dynamically via JS -->
                 </div>
             </div>
@@ -136,34 +128,34 @@
         <!-- =================================================================== -->
         <!-- TAB 3: CALCULATIONS (DEBUG VIEW) -->
         <!-- =================================================================== -->
-        <div id="tab-calculations" class="tab-content hidden space-y-6">
+        <div id="tab-calculations" class="tab-content hidden space-y-4 sm:space-y-6">
             
-            <div class="text-xs text-slate-400 bg-slate-800 p-4 rounded-xl border border-slate-700">
+            <div class="text-xs text-slate-400 bg-slate-800 p-3 rounded-xl border border-slate-700">
                 <span class="font-semibold text-emerald-400">Pipeline Stages Breakdown:</span> Stage 0 (Copy forced slots across quarter), Stage 1 (Payload & Constraints), Stage 2 (Initial Balance), Stage 3 (Quarter-by-Quarter Greedy Goalie Allocation with Exclusivity), Stage 4 (Re-balanced Minutes), Stage 5 (Defense D_L/D_R, Offense M_L/M_R/F allocation).
             </div>
 
             <!-- Projected End-of-Game Minutes (Statistics Report) -->
-            <div id="stage5-player-summary" class="bg-slate-800 p-5 rounded-xl border border-slate-700 shadow-lg overflow-x-auto"></div>
+            <div id="stage5-player-summary" class="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-lg overflow-x-auto"></div>
 
             <!-- Remaining Chunks Display & Stage 1 JSON Payload -->
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
                 
                 <!-- Remaining Chunks Display -->
-                <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 shadow-lg flex flex-col">
-                    <h2 class="font-semibold text-lg text-white mb-3">Remaining Time Chunks</h2>
+                <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-lg flex flex-col">
+                    <h2 class="font-semibold text-base sm:text-lg text-white mb-2">Remaining Time Chunks</h2>
                     <div id="chunks-container" class="space-y-2 flex-grow overflow-y-auto max-h-72 pr-1">
                         <!-- Populated dynamically via JS -->
                     </div>
                 </div>
 
                 <!-- Stage 1 Intermediate Payload Output -->
-                <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 shadow-lg flex flex-col">
-                    <div class="flex justify-between items-center mb-3">
-                        <h2 class="font-semibold text-lg text-white">Stage 1: Pipeline Payload</h2>
+                <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-lg flex flex-col">
+                    <div class="flex justify-between items-center mb-2">
+                        <h2 class="font-semibold text-base sm:text-lg text-white">Stage 1: Pipeline Payload</h2>
                         <span id="error-badge" class="text-xs px-2 py-0.5 rounded bg-slate-700 text-slate-300">0 Errors Logged</span>
                     </div>
                     <div class="text-xs text-slate-400 mb-2">Intermediate input payload:</div>
-                    <pre id="json-stage1-container" class="bg-slate-900 border border-slate-700 p-3 rounded-lg text-xs text-emerald-300 font-mono flex-grow overflow-y-auto max-h-60">
+                    <pre id="json-stage1-container" class="bg-slate-900 border border-slate-700 p-2.5 rounded-lg text-xs text-emerald-300 font-mono flex-grow overflow-y-auto max-h-60">
                         <!-- Populated dynamically via JS -->
                     </pre>
                 </div>
@@ -171,26 +163,26 @@
             </div>
 
             <!-- Stage 3 Goalie & Stage 4 Re-balance JSON Outputs -->
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
                 
                 <!-- Stage 3 Goalie Output -->
-                <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 shadow-lg flex flex-col space-y-3">
+                <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-lg flex flex-col space-y-2">
                     <div class="flex justify-between items-center">
-                        <h2 class="font-semibold text-lg text-white">Stage 3: Goalie Allocation</h2>
+                        <h2 class="font-semibold text-base sm:text-lg text-white">Stage 3: Goalie Allocation</h2>
                         <span class="text-xs px-2 py-0.5 rounded bg-emerald-900/60 text-emerald-300 border border-emerald-700 font-mono">Exclusivity & Constraint Aware</span>
                     </div>
-                    <pre id="json-stage3-container" class="bg-slate-900 border border-slate-700 p-3 rounded-lg text-xs text-emerald-300 font-mono flex-grow overflow-y-auto max-h-80">
+                    <pre id="json-stage3-container" class="bg-slate-900 border border-slate-700 p-2.5 rounded-lg text-xs text-emerald-300 font-mono flex-grow overflow-y-auto max-h-80">
                         <!-- Populated dynamically via JS -->
                     </pre>
                 </div>
 
                 <!-- Stage 4 Final Re-balanced Output -->
-                <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 shadow-lg flex flex-col space-y-3">
+                <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-lg flex flex-col space-y-2">
                     <div class="flex justify-between items-center">
-                        <h2 class="font-semibold text-lg text-white">Stage 4: Re-balanced Field Minutes</h2>
+                        <h2 class="font-semibold text-base sm:text-lg text-white">Stage 4: Re-balanced Field Minutes</h2>
                         <span class="text-xs px-2 py-0.5 rounded bg-emerald-900/60 text-emerald-300 border border-emerald-700 font-mono">Goalies Locked In</span>
                     </div>
-                    <pre id="json-stage4-container" class="bg-slate-900 border border-slate-700 p-3 rounded-lg text-xs text-emerald-300 font-mono flex-grow overflow-y-auto max-h-80">
+                    <pre id="json-stage4-container" class="bg-slate-900 border border-slate-700 p-2.5 rounded-lg text-xs text-emerald-300 font-mono flex-grow overflow-y-auto max-h-80">
                         <!-- Populated dynamically via JS -->
                     </pre>
                 </div>
@@ -198,9 +190,9 @@
             </div>
 
             <!-- Stage 5 Detailed JSON Output -->
-            <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 shadow-lg flex flex-col space-y-3">
-                <h2 class="font-semibold text-lg text-white">Stage 5: JSON Raw Output</h2>
-                <pre id="json-stage5-container" class="bg-slate-900 border border-slate-700 p-3 rounded-lg text-xs text-emerald-300 font-mono overflow-y-auto max-h-80"></pre>
+            <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-lg flex flex-col space-y-2">
+                <h2 class="font-semibold text-base sm:text-lg text-white">Stage 5: JSON Raw Output</h2>
+                <pre id="json-stage5-container" class="bg-slate-900 border border-slate-700 p-2.5 rounded-lg text-xs text-emerald-300 font-mono overflow-y-auto max-h-80"></pre>
             </div>
 
         </div>
@@ -305,45 +297,45 @@
                 row.className = 'hover:bg-slate-700/30 transition';
                 
                 let prefSelect = `
-                    <select onchange="updateGoaliePref(${index}, this.value)" class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-emerald-500">
+                    <select onchange="updateGoaliePref(${index}, this.value)" class="bg-slate-900 border border-slate-700 rounded px-1.5 py-1 text-xs text-white focus:outline-none focus:border-emerald-500">
                         <option value="preferred" ${player.goaliePref === 'preferred' ? 'selected' : ''}>Willing/Pref</option>
                         <option value="refuses" ${player.goaliePref === 'refuses' ? 'selected' : ''}>Refuses</option>
                     </select>
                 `;
 
                 row.innerHTML = `
-                    <td class="p-3 text-center">
+                    <td class="p-2.5 text-center">
                         <input type="checkbox" ${player.attending ? 'checked' : ''} onchange="updateAttendance(${index}, this.checked)" class="w-4 h-4 cursor-pointer accent-emerald-500">
                     </td>
-                    <td class="p-3 font-medium ${!player.attending ? 'line-through text-slate-500' : 'text-white'}">${player.name}</td>
-                    <td class="p-3">${prefSelect}</td>
-                    <td class="p-3 text-center">
+                    <td class="p-2.5 font-medium ${!player.attending ? 'line-through text-slate-500' : 'text-white'}">${player.name}</td>
+                    <td class="p-2.5">${prefSelect}</td>
+                    <td class="p-2.5 text-center">
                         <input type="number" value="${player.prior.G}" min="0" max="60" step="1"
                             onchange="updatePrior(${index}, 'G', this.value)"
-                            class="w-16 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-center text-white focus:outline-none focus:border-emerald-500"
+                            class="w-14 bg-slate-900 border border-slate-700 rounded px-1.5 py-1 text-center text-white focus:outline-none focus:border-emerald-500"
                             ${!player.attending ? 'disabled' : ''}>
                     </td>
-                    <td class="p-3 text-center">
+                    <td class="p-2.5 text-center">
                         <input type="number" value="${player.prior.D}" min="0" max="60" step="1"
                             onchange="updatePrior(${index}, 'D', this.value)"
-                            class="w-16 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-center text-white focus:outline-none focus:border-emerald-500"
+                            class="w-14 bg-slate-900 border border-slate-700 rounded px-1.5 py-1 text-center text-white focus:outline-none focus:border-emerald-500"
                             ${!player.attending ? 'disabled' : ''}>
                     </td>
-                    <td class="p-3 text-center">
+                    <td class="p-2.5 text-center">
                         <input type="number" value="${player.prior.M}" min="0" max="60" step="1"
                             onchange="updatePrior(${index}, 'M', this.value)"
-                            class="w-16 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-center text-white focus:outline-none focus:border-emerald-500"
+                            class="w-14 bg-slate-900 border border-slate-700 rounded px-1.5 py-1 text-center text-white focus:outline-none focus:border-emerald-500"
                             ${!player.attending ? 'disabled' : ''}>
                     </td>
-                    <td class="p-3 text-center">
+                    <td class="p-2.5 text-center">
                         <input type="number" value="${player.prior.F}" min="0" max="60" step="1"
                             onchange="updatePrior(${index}, 'F', this.value)"
-                            class="w-16 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-center text-white focus:outline-none focus:border-emerald-500"
+                            class="w-14 bg-slate-900 border border-slate-700 rounded px-1.5 py-1 text-center text-white focus:outline-none focus:border-emerald-500"
                             ${!player.attending ? 'disabled' : ''}>
                     </td>
-                    <td class="p-3">
+                    <td class="p-2.5">
                         <select onchange="updatePosition(${index}, this.value)"
-                            class="bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-white focus:outline-none focus:border-emerald-500 text-xs"
+                            class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white focus:outline-none focus:border-emerald-500 text-xs"
                             ${!player.attending ? 'disabled' : ''}>
                             <option value="bench" ${player.currentPosition === 'bench' ? 'selected' : ''}>On Bench</option>
                             <option value="G" ${player.currentPosition === 'G' ? 'selected' : ''}>G (Goalie)</option>
@@ -738,7 +730,7 @@
                 if (!calcTab) return;
                 container = document.createElement('div');
                 container.id = 'stage5-player-summary';
-                container.className = 'bg-slate-800 p-5 rounded-xl border border-slate-700 shadow-lg overflow-x-auto';
+                container.className = 'bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-lg overflow-x-auto';
                 calcTab.appendChild(container);
             }
 
@@ -805,8 +797,8 @@
         function formatPositionLabel(pos) {
             if (!pos) return '–';
             return pos
-                .replace('_L', '<sub class="text-[9px] font-semibold">L</sub>')
-                .replace('_R', '<sub class="text-[9px] font-semibold">R</sub>');
+                .replace('_L', '<sub class="text-[8px] sm:text-[9px] font-semibold">L</sub>')
+                .replace('_R', '<sub class="text-[8px] sm:text-[9px] font-semibold">R</sub>');
         }
 
         /**
@@ -826,23 +818,23 @@
                 Bench: 'text-slate-600'
             };
 
-            let html = `<table class="w-full text-xs text-center border-separate" style="border-spacing:3px">
-                <thead><tr class="text-slate-400"><th class="text-left pb-2 text-sm font-semibold text-slate-300">Player</th>
-                ${stage5.grid.map(g => `<th class="pb-2 bg-slate-900/60 rounded p-1.5"><div class="font-bold text-emerald-400">${g.chunk.id}</div><div class="font-normal text-[10px] text-slate-400">${g.chunk.duration}m</div></th>`).join('')}
+            let html = `<table class="w-full text-xs text-center border-separate" style="border-spacing:1px">
+                <thead><tr class="text-slate-400"><th class="text-left pb-1 text-xs sm:text-sm font-semibold text-slate-300 pr-1">Player</th>
+                ${stage5.grid.map(g => `<th class="pb-1 bg-slate-900/60 rounded px-0.5 py-1 min-w-[28px]"><div class="font-bold text-emerald-400 text-[11px] leading-tight">${g.chunk.id}</div><div class="font-normal text-[9px] text-slate-400 leading-tight">${g.chunk.duration}m</div></th>`).join('')}
                 </tr></thead><tbody>`;
             
             stage5.roster.forEach(p => {
-                html += `<tr><td class="text-left font-medium text-white pr-3 py-1">${p.name}</td>`;
+                html += `<tr><td class="text-left font-medium text-white pr-1.5 py-0.5 text-xs whitespace-nowrap">${p.name}</td>`;
                 stage5.grid.forEach(g => {
                     const cell = g.cells[p.id];
                     const posStr = cell.role === 'Bench' ? '–' : (cell.position || cell.role);
                     const formattedPos = formatPositionLabel(posStr);
-                    html += `<td class="rounded py-2 font-mono font-medium ${roleStyle[cell.role] || 'text-slate-400'}">${formattedPos}${cell.locked && cell.role !== 'G' ? '*' : ''}</td>`;
+                    html += `<td class="rounded py-1 px-0.5 font-mono font-medium text-[11px] sm:text-xs ${roleStyle[cell.role] || 'text-slate-400'}">${formattedPos}${cell.locked && cell.role !== 'G' ? '*' : ''}</td>`;
                 });
                 html += `</tr>`;
             });
             html += `</tbody></table>
-                <div class="text-[11px] text-slate-400 mt-3 pt-2 border-t border-slate-700/60 flex gap-4 flex-wrap">
+                <div class="text-[10px] sm:text-[11px] text-slate-400 mt-2 pt-1.5 border-t border-slate-700/60 flex gap-2 sm:gap-4 flex-wrap">
                     <span>* = hard constraint</span>
                     <span class="text-rose-300 font-semibold">G = goalie</span>
                     <span class="text-emerald-300 font-semibold">D<sub>L</sub>/D<sub>R</sub> = defense</span>
@@ -899,21 +891,21 @@
 
             manualConstraints.forEach((c, index) => {
                 const row = document.createElement('div');
-                row.className = 'flex items-center gap-3 bg-slate-900 p-2.5 rounded-lg border border-slate-700 text-sm';
+                row.className = 'flex items-center gap-2 sm:gap-3 bg-slate-900 p-2 sm:p-2.5 rounded-lg border border-slate-700 text-xs sm:text-sm';
                 
-                let playerSelect = `<select onchange="updateManualConstraint(${index}, 'playerId', this.value)" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-white text-xs">`;
+                let playerSelect = `<select onchange="updateManualConstraint(${index}, 'playerId', this.value)" class="bg-slate-800 border border-slate-700 rounded px-1.5 py-1 text-white text-xs">`;
                 timbresRoster.forEach(p => {
                     playerSelect += `<option value="${p.id}" ${p.id === c.playerId ? 'selected' : ''}>${p.name}</option>`;
                 });
                 playerSelect += `</select>`;
 
-                let chunkSelect = `<select onchange="updateManualConstraint(${index}, 'chunkId', this.value)" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-white text-xs">`;
+                let chunkSelect = `<select onchange="updateManualConstraint(${index}, 'chunkId', this.value)" class="bg-slate-800 border border-slate-700 rounded px-1.5 py-1 text-white text-xs">`;
                 currentChunks.forEach(ch => {
                     chunkSelect += `<option value="${ch.id}" ${ch.id === c.chunkId ? 'selected' : ''}>${ch.id}</option>`;
                 });
                 chunkSelect += `</select>`;
 
-                let posSelect = `<select onchange="updateManualConstraint(${index}, 'position', this.value)" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-white text-xs">
+                let posSelect = `<select onchange="updateManualConstraint(${index}, 'position', this.value)" class="bg-slate-800 border border-slate-700 rounded px-1.5 py-1 text-white text-xs">
                     <option value="G" ${c.position === 'G' ? 'selected' : ''}>G</option>
                     <option value="D_L" ${c.position === 'D_L' ? 'selected' : ''}>D_L</option>
                     <option value="D_R" ${c.position === 'D_R' ? 'selected' : ''}>D_R</option>
@@ -923,12 +915,12 @@
                 </select>`;
 
                 row.innerHTML = `
-                    <div class="flex-grow flex items-center gap-2 flex-wrap">
+                    <div class="flex-grow flex items-center gap-1.5 sm:gap-2 flex-wrap">
                         <span class="text-xs text-slate-400">Player:</span> ${playerSelect}
-                        <span class="text-xs text-slate-400 ml-2">Chunk:</span> ${chunkSelect}
-                        <span class="text-xs text-slate-400 ml-2">Pos:</span> ${posSelect}
+                        <span class="text-xs text-slate-400 ml-1">Chunk:</span> ${chunkSelect}
+                        <span class="text-xs text-slate-400 ml-1">Pos:</span> ${posSelect}
                     </div>
-                    <button onclick="removeManualConstraintRow(${index})" class="text-xs text-rose-400 hover:text-rose-300 px-2 py-1 font-bold">✕</button>
+                    <button onclick="removeManualConstraintRow(${index})" class="text-xs text-rose-400 hover:text-rose-300 px-1.5 py-1 font-bold">✕</button>
                 `;
                 container.appendChild(row);
             });
@@ -1467,14 +1459,14 @@
 
             chunks.forEach(chunk => {
                 const div = document.createElement('div');
-                div.className = `p-3 rounded-lg border flex justify-between items-center ${chunk.isPartial ? 'bg-amber-950/30 border-amber-600/50' : 'bg-slate-900 border-slate-700'}`;
+                div.className = `p-2.5 rounded-lg border flex justify-between items-center ${chunk.isPartial ? 'bg-amber-950/30 border-amber-600/50' : 'bg-slate-900 border-slate-700'}`;
                 div.innerHTML = `
                     <div>
-                        <span class="font-bold text-white">${chunk.id}</span>
+                        <span class="font-bold text-white text-xs sm:text-sm">${chunk.id}</span>
                         <span class="text-xs text-slate-400 ml-2">Quarter ${chunk.quarter}</span>
                         ${chunk.isPartial ? '<span class="ml-2 px-1.5 py-0.5 text-[10px] bg-amber-900/60 text-amber-300 rounded border border-amber-700">Active Partial</span>' : ''}
                     </div>
-                    <div class="text-emerald-400 font-bold">${chunk.duration} min</div>
+                    <div class="text-emerald-400 font-bold text-xs sm:text-sm">${chunk.duration} min</div>
                 `;
                 container.appendChild(div);
             });
