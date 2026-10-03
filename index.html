@@ -255,18 +255,19 @@
         // ROSTER CONFIGURATION & GLOBAL STATE
         // =========================================================================
 
-        const timbresRoster = [
-            { id: 'Jesse', name: 'Jesse', goaliePref: 'preferred' },
-            { id: 'Ellis', name: 'Ellis', goaliePref: 'preferred' },
-            { id: 'Bennet', name: 'Bennet', goaliePref: 'preferred' },
-            { id: 'Diego', name: 'Diego', goaliePref: 'preferred' },
-            { id: 'London', name: 'London', goaliePref: 'refuses' },
-            { id: 'Kyton', name: 'Kyton', goaliePref: 'preferred' },
-            { id: 'Vivian', name: 'Vivian', goaliePref: 'refuses' },
-            { id: 'Isabelle', name: 'Isabelle', goaliePref: 'refuses' },
-            { id: 'Olivia', name: 'Olivia', goaliePref: 'refuses' },
-            { id: 'Elena', name: 'Elena', goaliePref: 'refuses' }
-        ];
+const timbresRoster = [
+  { id: 'Jesse', name: 'Jesse', active: true, goaliePref: 'preferred', gkScore: 3, defScore: 4, midScore: 4, fwdScore: 3 },
+  { id: 'Ellis', name: 'Ellis', active: true, goaliePref: 'preferred', gkScore: 3, defScore: 3, midScore: 3, fwdScore: 4 },
+  { id: 'Bennet', name: 'Bennet', active: true, goaliePref: 'preferred', gkScore: 2, defScore: 3, midScore: 2, fwdScore: 3 },
+  { id: 'Diego', name: 'Diego', active: true, goaliePref: 'preferred', gkScore: 3, defScore: 4, midScore: 3, fwdScore: 5 },
+  { id: 'London', name: 'London', active: true, goaliePref: 'refuses', gkScore: 0, defScore: 3, midScore: 3, fwdScore: 3 },
+  { id: 'Kyton', name: 'Kyton', active: true, goaliePref: 'preferred', gkScore: 3, defScore: 4, midScore: 2, fwdScore: 2 },
+  { id: 'Vivian', name: 'Vivian', active: true, goaliePref: 'refuses', gkScore: 0, defScore: 3, midScore: 3, fwdScore: 3 },
+  { id: 'Isabelle', name: 'Isabelle', active: true, goaliePref: 'refuses', gkScore: 0, defScore: 3, midScore: 2, fwdScore: 2 },
+  { id: 'Olivia', name: 'Olivia', active: true, goaliePref: 'refuses', gkScore: 0, defScore: 2, midScore: 3, fwdScore: 4 },
+  { id: 'Elena', name: 'Elena', active: true, goaliePref: 'refuses', gkScore: 0, defScore: 2, midScore: 2, fwdScore: 2 }
+];
+
 
         let playerStates = timbresRoster.map(p => ({
             ...p,
@@ -592,9 +593,12 @@
          * Stage 5 Core Algorithm: Distributes outfield players across Defense (D_L, D_R)
          * and Offense (M_L, M_R, F) categories fairly across quarter pairs and chunks.
          */
- function allocatePositionCategories(stage4Output, payload, chunks, constraints) {
+function allocatePositionCategories(stage4Output, payload, chunks, constraints) {
             const warnings = [];
             const stats = {};
+            
+            const prioritizeBalancedDefense = payload.prioritizeBalancedDefense !== false; 
+
             payload.roster.forEach(p => {
                 const pr = p.priorMinutes;
                 stats[p.id] = {
@@ -605,6 +609,14 @@
                     pending: 0
                 };
             });
+
+            const getPlayerScore = (playerObj, slot) => {
+                if (!playerObj) return 1;
+                if (slot.startsWith('D')) return playerObj.defScore !== undefined ? playerObj.defScore : 1;
+                if (slot.startsWith('M')) return playerObj.midScore !== undefined ? playerObj.midScore : 1;
+                if (slot === 'F') return playerObj.fwdScore !== undefined ? playerObj.fwdScore : 1;
+                return 1;
+            };
 
             const quarterMap = {};
             chunks.forEach(chunk => {
@@ -669,7 +681,37 @@
             });
 
             const allocateRole = (role, slotsKey) => {
-                // 1. Prioritize full quarters ONLY for players with 0 minutes in this category
+                const isBetterCandidate = (candidateId, currentBestId, chunkOrPair) => {
+                    if (!currentBestId) return true;
+                    
+                    // 1. Prioritize lower minutes in category
+                    if (stats[candidateId][slotsKey] !== stats[currentBestId][slotsKey]) {
+                        return stats[candidateId][slotsKey] < stats[currentBestId][slotsKey];
+                    }
+                    
+                    // 2. Balanced defense tie-breaker
+                    if (role === 'D' && prioritizeBalancedDefense) {
+                        const slotsLeft = Array.isArray(chunkOrPair) ? chunkOrPair[0].slotsLeft.D : chunkOrPair.slotsLeft.D;
+                        
+                        const candP = payload.roster.find(p => p.id === candidateId);
+                        const bestP = payload.roster.find(p => p.id === currentBestId);
+                        const candSkill = getPlayerScore(candP, 'D'); 
+                        const bestSkill = getPlayerScore(bestP, 'D');
+                        
+                        if (candSkill !== bestSkill) {
+                            return slotsLeft >= 2 ? (candSkill > bestSkill) : (candSkill < bestSkill);
+                        }
+                    }
+
+                    // 3. Prioritize higher pending total minutes
+                    if (stats[candidateId].pending !== stats[currentBestId].pending) {
+                        return stats[candidateId].pending > stats[currentBestId].pending;
+                    }
+                    
+                    return false;
+                };
+
+                // 1. Prioritize full quarters for pairs where the player is freely available in both chunks
                 let keepGoingPairs = true;
                 while (keepGoingPairs) {
                     keepGoingPairs = false;
@@ -680,13 +722,13 @@
                         if (g1.slotsLeft[slotsKey] > 0 && g2.slotsLeft[slotsKey] > 0) {
                             const blockDuration = g1.chunk.duration + g2.chunk.duration;
                             const eligiblePlayers = Object.keys(g1.cells)
-                                .filter(id => g1.cells[id].role === null && g2.cells[id].role === null)
+                                .filter(id => g1.cells[id].role === null && !g1.cells[id].locked &&
+                                              g2.cells[id].role === null && !g2.cells[id].locked)
                                 .filter(id => stats[id].pending >= blockDuration)
-                                .filter(id => stats[id][slotsKey] === 0); // Stops forcing full quarters on those who already have time
+                                .filter(id => stats[id][slotsKey] === 0);
                                 
                             eligiblePlayers.forEach(id => {
-                                if (!bestCandidate || 
-                                    (stats[id].pending > stats[bestCandidate.id].pending)) {
+                                if (isBetterCandidate(id, bestCandidate ? bestCandidate.id : null, pair)) {
                                     bestCandidate = { id, pair };
                                 }
                             });
@@ -705,7 +747,7 @@
                     }
                 }
 
-                // 2. Fallback to individual chunks globally to balance evenly
+                // 2. Fallback to individual chunks globally where the player is freely available
                 let keepGoingIndividuals = true;
                 while (keepGoingIndividuals) {
                     keepGoingIndividuals = false;
@@ -715,13 +757,11 @@
                         if (g.slotsLeft[slotsKey] > 0) {
                             const dur = g.chunk.duration;
                             const eligiblePlayers = Object.keys(g.cells)
-                                .filter(id => g.cells[id].role === null)
+                                .filter(id => g.cells[id].role === null && !g.cells[id].locked)
                                 .filter(id => stats[id].pending >= dur);
                                 
                             eligiblePlayers.forEach(id => {
-                                if (!bestCandidate || 
-                                    stats[id][slotsKey] < stats[bestCandidate.id][slotsKey] || 
-                                    (stats[id][slotsKey] === stats[bestCandidate.id][slotsKey] && stats[id].pending > stats[bestCandidate.id].pending)) {
+                                if (isBetterCandidate(id, bestCandidate ? bestCandidate.id : null, g)) {
                                     bestCandidate = { id, g };
                                 }
                             });
@@ -739,14 +779,12 @@
                 }
             };
 
-            // Allocate Defense first globally, then Offense globally
             allocateRole('D', 'D');
             allocateRole('O', 'O');
 
-            // STAGE 5E: Remainder / Flex
             grid.forEach(g => {
                 Object.keys(g.cells).forEach(id => {
-                    if (g.cells[id].role === null) {
+                    if (g.cells[id].role === null && !g.cells[id].locked) {
                         g.cells[id] = { role: 'Flex', locked: false, position: 'Flex' };
                         stats[id].Flex += g.chunk.duration;
                         stats[id].pending -= g.chunk.duration;
@@ -775,15 +813,7 @@
                         dPlayerIds.forEach((playerId, index) => {
                             const assignedSlot = slotAssignment[index];
                             const playerObj = payload.roster.find(p => p.id === playerId);
-                            let ability = 1;
-                            if (playerObj) {
-                                if (playerObj.abilities && playerObj.abilities[assignedSlot] !== undefined) {
-                                    ability = playerObj.abilities[assignedSlot];
-                                } else if (playerObj.ratings && playerObj.ratings[assignedSlot] !== undefined) {
-                                    ability = playerObj.ratings[assignedSlot];
-                                }
-                            }
-                            currentScore += ability;
+                            currentScore += getPlayerScore(playerObj, assignedSlot);
                         });
                         if (currentScore > bestScore) {
                             bestScore = currentScore;
@@ -828,16 +858,7 @@
                         oPlayerIds.forEach((playerId, index) => {
                             const assignedSlot = slotAssignment[index];
                             const playerObj = payload.roster.find(p => p.id === playerId);
-                            
-                            let ability = 1;
-                            if (playerObj) {
-                                if (playerObj.abilities && playerObj.abilities[assignedSlot] !== undefined) {
-                                    ability = playerObj.abilities[assignedSlot];
-                                } else if (playerObj.ratings && playerObj.ratings[assignedSlot] !== undefined) {
-                                    ability = playerObj.ratings[assignedSlot];
-                                }
-                            }
-                            currentScore += ability;
+                            currentScore += getPlayerScore(playerObj, assignedSlot);
                         });
 
                         if (currentScore > bestScore) {
@@ -905,7 +926,8 @@
             grid = runStage6ConsistencyPass(grid, payload);
 
             return { grid, stats, roster: payload.roster, warnings, json };
-        }        function renderPlayerSummaryReport(stage5) {
+        }      
+        function renderPlayerSummaryReport(stage5) {
             let container = document.getElementById('stage5-player-summary');
             if (!container) return;
 

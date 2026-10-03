@@ -1,0 +1,5 @@
+I am trying to make a soccer substitution program using various LLMs. Right now I need some improvements with regard to the defense assignements.
+
+
+
+The idea is that first total minutes per player should be equalized, then goalies assigned, then future minutes re-equalized respecting goalie constraints (as well as hard coded constraints respected at all times). At this step, each player should have an allocation of future minutes (goalie and field). Then we start deciding who plays defense each quarter. We priorize assign full quarters of defense to players who haven't played defense yet. After everyone that could play a full quarter that hasn't played has been assigned, we move on to assigning half quarters (the smallest block of time we track) to people who need defense. After everyone has some, the rest of a player minutes should be flexible. Then we move to offensive assignment and proceed in the same manner.
