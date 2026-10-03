@@ -1084,6 +1084,7 @@
 
         function updatePosition(index, value) {
             playerStates[index].currentPosition = value;
+            renderRoster();              // redraw so the roster button shows the new position
             recalculateAll();
         }
 
@@ -1144,6 +1145,7 @@
 
         function updateManualConstraint(index, field, value) {
             manualConstraints[index][field] = value;
+            renderManualConstraints();   // redraw the row so it shows the new player / chunk / position
             recalculateAll();
         }
 
