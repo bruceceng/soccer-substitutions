@@ -2,201 +2,235 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Portland Timbers U8 - Macro Pipeline & Goalie Engine</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         .debug-element.hidden {
             display: none !important;
         }
+        /* Mobile touch scrolling optimization */
+        .touch-scroll {
+            -webkit-overflow-scrolling: touch;
+        }
+        /* Disable text selection on long-press targets */
+        .prevent-select {
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+        }
     </style>
 </head>
-<body class="bg-slate-900 text-slate-100 font-sans min-h-screen p-2 sm:p-6">
-    <div class="max-w-6xl mx-auto space-y-3 sm:space-y-6">
+<body class="bg-slate-900 text-slate-100 font-sans h-screen flex flex-col overflow-hidden">
 
-        <!-- Rule Conflict / Partial Allocation Warning Banner -->
-        <div id="rule-banner" class="hidden text-xs sm:text-sm bg-rose-950/60 border border-rose-700 text-rose-200 rounded-lg p-2.5"></div>
-
-        <!-- Navigation Tabs -->
-        <div class="flex border-b border-slate-800 space-x-1 sm:space-x-2 overflow-x-auto pb-1 sm:pb-0">
-            <button onclick="switchTab('setup')" data-tab="setup" class="tab-btn px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-semibold border-b-2 border-emerald-500 text-emerald-400 bg-slate-800 rounded-t-lg transition whitespace-nowrap">
+    <!-- Top Sticky Navigation Tabs Bar -->
+    <div class="flex-none bg-slate-900 border-b border-slate-800 px-3 pt-2 z-20">
+        <div class="max-w-6xl mx-auto flex space-x-1 sm:space-x-2 overflow-x-auto pb-1">
+            <button onclick="switchTab('setup')" data-tab="setup" class="tab-btn px-4 py-2 text-xs sm:text-sm font-semibold border-b-2 border-emerald-500 text-emerald-400 bg-slate-800 rounded-t-lg transition whitespace-nowrap">
                 Setup
             </button>
-            <button onclick="switchTab('lineup')" data-tab="lineup" class="tab-btn px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-semibold border-b-2 border-transparent text-slate-400 hover:text-slate-200 rounded-t-lg transition whitespace-nowrap">
+            <button onclick="switchTab('lineup')" data-tab="lineup" class="tab-btn px-4 py-2 text-xs sm:text-sm font-semibold border-b-2 border-transparent text-slate-400 hover:text-slate-200 rounded-t-lg transition whitespace-nowrap">
                 Lineup
             </button>
-            <button id="calc-tab-btn" onclick="switchTab('calculations')" data-tab="calculations" class="tab-btn hidden px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-semibold border-b-2 border-transparent text-amber-400 hover:text-amber-300 bg-amber-950/30 rounded-t-lg transition whitespace-nowrap">
+            <button id="calc-tab-btn" onclick="switchTab('calculations')" data-tab="calculations" class="tab-btn hidden px-4 py-2 text-xs sm:text-sm font-semibold border-b-2 border-transparent text-amber-400 hover:text-amber-300 bg-amber-950/30 rounded-t-lg transition whitespace-nowrap">
                 Calculations (Debug)
             </button>
         </div>
+    </div>
 
-        <!-- =================================================================== -->
-        <!-- TAB 1: SETUP -->
-        <!-- =================================================================== -->
-        <div id="tab-setup" class="tab-content space-y-4 sm:space-y-6">
-            
-            <!-- Game Configuration & Time Control Card -->
-            <div class="bg-slate-800 p-3 sm:p-5 rounded-xl border border-slate-700 shadow-lg grid grid-cols-1 md:grid-cols-2 gap-3 items-center">
-                <div>
-                    <label class="block text-xs sm:text-sm font-medium text-slate-300 mb-1">Remaining Game Time (Mins)</label>
-                    <input type="number" id="remaining-time" value="48" step="1" min="1" max="48" 
-                        class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 sm:py-2 text-white focus:outline-none focus:border-emerald-500 font-bold text-sm"
-                        oninput="recalculateAll()">
+    <!-- Main Scrollable Body Container -->
+    <main class="flex-grow overflow-y-auto p-2 sm:p-6 touch-scroll">
+        <div class="max-w-6xl mx-auto space-y-3 sm:space-y-6">
+
+            <!-- Rule Conflict / Partial Allocation Warning Banner -->
+            <div id="rule-banner" class="hidden text-xs sm:text-sm bg-rose-950/60 border border-rose-700 text-rose-200 rounded-lg p-2.5"></div>
+
+            <!-- =================================================================== -->
+            <!-- TAB 1: SETUP -->
+            <!-- =================================================================== -->
+            <div id="tab-setup" class="tab-content space-y-4 sm:space-y-6">
+                
+                <!-- Game Configuration & Time Control Card -->
+                <div class="bg-slate-800 p-3 sm:p-5 rounded-xl border border-slate-700 shadow-lg grid grid-cols-1 md:grid-cols-2 gap-3 items-center">
+                    <div>
+                        <label class="block text-xs sm:text-sm font-medium text-slate-300 mb-1">Remaining Game Time (Mins)</label>
+                        <input type="number" id="remaining-time" value="48" step="1" min="1" max="48" 
+                            class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 sm:py-2 text-white focus:outline-none focus:border-emerald-500 font-bold text-sm"
+                            oninput="recalculateAll()" onchange="recalculateAll()">
+                        
+                        <div class="flex items-center gap-2 mt-3 bg-slate-900 p-2.5 rounded-lg border border-slate-700 w-full">
+                            <input type="checkbox" id="debug-toggle" onchange="toggleDebugMode()" class="w-4 h-4 accent-emerald-500 cursor-pointer">
+                            <label for="debug-toggle" class="text-xs sm:text-sm font-medium text-slate-300 cursor-pointer">Debug Mode (Show Calculations Tab)</label>
+                        </div>
+                    </div>
+                    <div class="text-xs text-slate-400 bg-slate-900 p-2.5 rounded-lg border border-slate-700">
+                        <span class="font-semibold text-emerald-400">Setup Instructions:</span> Set overall remaining match length, adjust attendance and goalie willingness, record historical position minutes, or manage manual constraints.
+                    </div>
+                </div>
+
+                <!-- Player Roster & Historical Tracking Table -->
+                <div class="bg-slate-800 rounded-xl border border-slate-700 shadow-lg overflow-hidden">
+                    <div class="p-3 sm:p-4 border-b border-slate-700 flex justify-between items-center">
+                        <h2 class="font-semibold text-sm sm:text-lg text-white">Roster, Position History & Field Status</h2>
+                        <button onclick="resetPriorMinutes()" class="text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 px-2.5 py-1 rounded transition">
+                            Reset Prior Mins
+                        </button>
+                    </div>
+                    <div class="overflow-x-auto touch-scroll">
+                        <table class="w-full text-left border-collapse min-w-[580px]">
+                            <thead>
+                                <tr class="bg-slate-900/50 text-slate-400 text-xs uppercase tracking-wider border-b border-slate-700">
+                                    <th class="p-2.5 text-center">Attending</th>
+                                    <th class="p-2.5">Player</th>
+                                    <th class="p-2.5">Goalie Pref</th>
+                                    <th class="p-2.5 text-center">Prior G</th>
+                                    <th class="p-2.5 text-center">Prior D</th>
+                                    <th class="p-2.5 text-center">Prior M</th>
+                                    <th class="p-2.5 text-center">Prior F</th>
+                                    <th class="p-2.5">Current Field Position</th>
+                                </tr>
+                            </thead>
+                            <tbody id="roster-table-body" class="divide-y divide-slate-700/50 text-xs sm:text-sm">
+                                <!-- Populated dynamically via JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Manual Constraints Override Manager -->
+                <div class="bg-slate-800 p-3 sm:p-5 rounded-xl border border-slate-700 shadow-lg space-y-3">
+                    <div class="flex justify-between items-center">
+                        <div>
+                            <h2 class="font-semibold text-sm sm:text-lg text-white">Manual Player Constraints</h2>
+                            <p class="text-xs text-slate-400 hidden sm:block">Force a player into a specific position for a specific time chunk.</p>
+                        </div>
+                        <button onclick="addManualConstraintRow()" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium px-2.5 py-1.5 rounded-lg transition shadow">
+                            + Add Constraint
+                        </button>
+                    </div>
+                    <div id="manual-constraints-list" class="space-y-2">
+                        <!-- Populated dynamically via JS -->
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- =================================================================== -->
+            <!-- TAB 2: LINEUP (PRIMARY OUTPUT GRID) -->
+            <!-- =================================================================== -->
+            <div id="tab-lineup" class="tab-content hidden space-y-4 sm:space-y-6">
+                
+                <!-- Stage 5 Position Bucket Allocation Output -->
+                <div class="bg-slate-800 p-3 sm:p-5 rounded-xl border border-slate-700 shadow-lg flex flex-col space-y-3">
+                    <div class="flex justify-between items-center border-b border-slate-700 pb-2">
+                        <div>
+                            <h2 class="font-semibold text-base sm:text-lg text-white">Lineup Assignment Matrix</h2>
+                            <p class="text-xs text-slate-400">Tap and hold any slot to edit/override player constraints.</p>
+                        </div>
+                    </div>
+
+                    <!-- Visual container for DOM rendering -->
+                    <div id="stage5-visual-container" class="space-y-3 overflow-x-auto touch-scroll pr-1 prevent-select">
+                        <!-- Populated dynamically via JS -->
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- =================================================================== -->
+            <!-- TAB 3: CALCULATIONS (DEBUG VIEW) -->
+            <!-- =================================================================== -->
+            <div id="tab-calculations" class="tab-content hidden space-y-4 sm:space-y-6">
+                
+                <div class="text-xs text-slate-400 bg-slate-800 p-3 rounded-xl border border-slate-700">
+                    <span class="font-semibold text-emerald-400">Pipeline Stages Breakdown:</span> Stage 0 (Copy forced slots across quarter), Stage 1 (Payload & Constraints), Stage 2 (Initial Balance), Stage 3 (Quarter-by-Quarter Greedy Goalie Allocation with Exclusivity), Stage 4 (Re-balanced Minutes), Stage 5 (Defense D_L/D_R, Offense M_L/M_R/F allocation).
+                </div>
+
+                <!-- Projected End-of-Game Minutes (Statistics Report) -->
+                <div id="stage5-player-summary" class="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-lg overflow-x-auto"></div>
+
+                <!-- Remaining Chunks Display & Stage 1 JSON Payload -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
                     
-                    <div class="flex items-center gap-2 mt-3 bg-slate-900 p-2.5 rounded-lg border border-slate-700 w-full">
-                        <input type="checkbox" id="debug-toggle" onchange="toggleDebugMode()" class="w-4 h-4 accent-emerald-500 cursor-pointer">
-                        <label for="debug-toggle" class="text-xs sm:text-sm font-medium text-slate-300 cursor-pointer">Debug Mode (Show Calculations Tab)</label>
-                    </div>
-                </div>
-                <div class="text-xs text-slate-400 bg-slate-900 p-2.5 rounded-lg border border-slate-700">
-                    <span class="font-semibold text-emerald-400">Setup Instructions:</span> Set overall remaining match length, adjust attendance and goalie willingness, record historical position minutes, and add any specific time-chunk position constraints.
-                </div>
-            </div>
-
-            <!-- Player Roster & Historical Tracking Table -->
-            <div class="bg-slate-800 rounded-xl border border-slate-700 shadow-lg overflow-hidden">
-                <div class="p-3 sm:p-4 border-b border-slate-700 flex justify-between items-center">
-                    <h2 class="font-semibold text-sm sm:text-lg text-white">Roster, Position History & Field Status</h2>
-                    <button onclick="resetPriorMinutes()" class="text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 px-2.5 py-1 rounded transition">
-                        Reset Prior Mins
-                    </button>
-                </div>
-                <div class="overflow-x-auto">
-                    <table class="w-full text-left border-collapse min-w-[580px]">
-                        <thead>
-                            <tr class="bg-slate-900/50 text-slate-400 text-xs uppercase tracking-wider border-b border-slate-700">
-                                <th class="p-2.5 text-center">Attending</th>
-                                <th class="p-2.5">Player</th>
-                                <th class="p-2.5">Goalie Pref</th>
-                                <th class="p-2.5 text-center">Prior G</th>
-                                <th class="p-2.5 text-center">Prior D</th>
-                                <th class="p-2.5 text-center">Prior M</th>
-                                <th class="p-2.5 text-center">Prior F</th>
-                                <th class="p-2.5">Current Field Position</th>
-                            </tr>
-                        </thead>
-                        <tbody id="roster-table-body" class="divide-y divide-slate-700/50 text-xs sm:text-sm">
+                    <!-- Remaining Chunks Display -->
+                    <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-lg flex flex-col">
+                        <h2 class="font-semibold text-base sm:text-lg text-white mb-2">Remaining Time Chunks</h2>
+                        <div id="chunks-container" class="space-y-2 flex-grow overflow-y-auto max-h-72 pr-1">
                             <!-- Populated dynamically via JS -->
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            <!-- Manual Constraints Override Manager -->
-            <div class="bg-slate-800 p-3 sm:p-5 rounded-xl border border-slate-700 shadow-lg space-y-3">
-                <div class="flex justify-between items-center">
-                    <div>
-                        <h2 class="font-semibold text-sm sm:text-lg text-white">Manual Player Constraints</h2>
-                        <p class="text-xs text-slate-400 hidden sm:block">Force a player into a specific position for a specific time chunk.</p>
+                        </div>
                     </div>
-                    <button onclick="addManualConstraintRow()" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium px-2.5 py-1.5 rounded-lg transition shadow">
-                        + Add Constraint
-                    </button>
-                </div>
-                <div id="manual-constraints-list" class="space-y-2">
-                    <!-- Populated dynamically via JS -->
-                </div>
-            </div>
 
-        </div>
-
-        <!-- =================================================================== -->
-        <!-- TAB 2: LINEUP (PRIMARY OUTPUT GRID) -->
-        <!-- =================================================================== -->
-        <div id="tab-lineup" class="tab-content hidden space-y-4 sm:space-y-6">
-            
-            <!-- Stage 5 Position Bucket Allocation Output -->
-            <div class="bg-slate-800 p-3 sm:p-5 rounded-xl border border-slate-700 shadow-lg flex flex-col space-y-3">
-                <div class="flex justify-between items-center border-b border-slate-700 pb-2">
-                    <div>
-                        <h2 class="font-semibold text-base sm:text-lg text-white">Lineup Assignment Matrix</h2>
-                        <p class="text-xs text-slate-400 hidden sm:block">Final period-by-period field lineup & rotations across all positions.</p>
+                    <!-- Stage 1 Intermediate Payload Output -->
+                    <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-lg flex flex-col">
+                        <div class="flex justify-between items-center mb-2">
+                            <h2 class="font-semibold text-base sm:text-lg text-white">Stage 1: Pipeline Payload</h2>
+                            <span id="error-badge" class="text-xs px-2 py-0.5 rounded bg-slate-700 text-slate-300">0 Errors Logged</span>
+                        </div>
+                        <div class="text-xs text-slate-400 mb-2">Intermediate input payload:</div>
+                        <pre id="json-stage1-container" class="bg-slate-900 border border-slate-700 p-2.5 rounded-lg text-xs text-emerald-300 font-mono flex-grow overflow-y-auto max-h-60">
+                            <!-- Populated dynamically via JS -->
+                        </pre>
                     </div>
-                    <button onclick="switchTab('setup')" class="text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 px-2.5 py-1 rounded transition">
-                        Edit Setup
-                    </button>
+
                 </div>
 
-                <!-- Visual container for DOM rendering -->
-                <div id="stage5-visual-container" class="space-y-3 overflow-x-auto pr-1">
-                    <!-- Populated dynamically via JS -->
-                </div>
-            </div>
-
-        </div>
-
-        <!-- =================================================================== -->
-        <!-- TAB 3: CALCULATIONS (DEBUG VIEW) -->
-        <!-- =================================================================== -->
-        <div id="tab-calculations" class="tab-content hidden space-y-4 sm:space-y-6">
-            
-            <div class="text-xs text-slate-400 bg-slate-800 p-3 rounded-xl border border-slate-700">
-                <span class="font-semibold text-emerald-400">Pipeline Stages Breakdown:</span> Stage 0 (Copy forced slots across quarter), Stage 1 (Payload & Constraints), Stage 2 (Initial Balance), Stage 3 (Quarter-by-Quarter Greedy Goalie Allocation with Exclusivity), Stage 4 (Re-balanced Minutes), Stage 5 (Defense D_L/D_R, Offense M_L/M_R/F allocation).
-            </div>
-
-            <!-- Projected End-of-Game Minutes (Statistics Report) -->
-            <div id="stage5-player-summary" class="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-lg overflow-x-auto"></div>
-
-            <!-- Remaining Chunks Display & Stage 1 JSON Payload -->
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
-                
-                <!-- Remaining Chunks Display -->
-                <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-lg flex flex-col">
-                    <h2 class="font-semibold text-base sm:text-lg text-white mb-2">Remaining Time Chunks</h2>
-                    <div id="chunks-container" class="space-y-2 flex-grow overflow-y-auto max-h-72 pr-1">
-                        <!-- Populated dynamically via JS -->
+                <!-- Stage 3 Goalie & Stage 4 Re-balance JSON Outputs -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
+                    
+                    <!-- Stage 3 Goalie Output -->
+                    <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-lg flex flex-col space-y-2">
+                        <div class="flex justify-between items-center">
+                            <h2 class="font-semibold text-base sm:text-lg text-white">Stage 3: Goalie Allocation</h2>
+                            <span class="text-xs px-2 py-0.5 rounded bg-emerald-900/60 text-emerald-300 border border-emerald-700 font-mono">Exclusivity & Constraint Aware</span>
+                        </div>
+                        <pre id="json-stage3-container" class="bg-slate-900 border border-slate-700 p-2.5 rounded-lg text-xs text-emerald-300 font-mono flex-grow overflow-y-auto max-h-80">
+                            <!-- Populated dynamically via JS -->
+                        </pre>
                     </div>
-                </div>
 
-                <!-- Stage 1 Intermediate Payload Output -->
-                <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-lg flex flex-col">
-                    <div class="flex justify-between items-center mb-2">
-                        <h2 class="font-semibold text-base sm:text-lg text-white">Stage 1: Pipeline Payload</h2>
-                        <span id="error-badge" class="text-xs px-2 py-0.5 rounded bg-slate-700 text-slate-300">0 Errors Logged</span>
+                    <!-- Stage 4 Final Re-balanced Output -->
+                    <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-lg flex flex-col space-y-2">
+                        <div class="flex justify-between items-center">
+                            <h2 class="font-semibold text-base sm:text-lg text-white">Stage 4: Re-balanced Field Minutes</h2>
+                            <span class="text-xs px-2 py-0.5 rounded bg-emerald-900/60 text-emerald-300 border border-emerald-700 font-mono">Goalies Locked In</span>
+                        </div>
+                        <pre id="json-stage4-container" class="bg-slate-900 border border-slate-700 p-2.5 rounded-lg text-xs text-emerald-300 font-mono flex-grow overflow-y-auto max-h-80">
+                            <!-- Populated dynamically via JS -->
+                        </pre>
                     </div>
-                    <div class="text-xs text-slate-400 mb-2">Intermediate input payload:</div>
-                    <pre id="json-stage1-container" class="bg-slate-900 border border-slate-700 p-2.5 rounded-lg text-xs text-emerald-300 font-mono flex-grow overflow-y-auto max-h-60">
-                        <!-- Populated dynamically via JS -->
-                    </pre>
+
                 </div>
 
-            </div>
-
-            <!-- Stage 3 Goalie & Stage 4 Re-balance JSON Outputs -->
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
-                
-                <!-- Stage 3 Goalie Output -->
+                <!-- Stage 5 Detailed JSON Output -->
                 <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-lg flex flex-col space-y-2">
-                    <div class="flex justify-between items-center">
-                        <h2 class="font-semibold text-base sm:text-lg text-white">Stage 3: Goalie Allocation</h2>
-                        <span class="text-xs px-2 py-0.5 rounded bg-emerald-900/60 text-emerald-300 border border-emerald-700 font-mono">Exclusivity & Constraint Aware</span>
-                    </div>
-                    <pre id="json-stage3-container" class="bg-slate-900 border border-slate-700 p-2.5 rounded-lg text-xs text-emerald-300 font-mono flex-grow overflow-y-auto max-h-80">
-                        <!-- Populated dynamically via JS -->
-                    </pre>
+                    <h2 class="font-semibold text-base sm:text-lg text-white">Stage 5: JSON Raw Output</h2>
+                    <pre id="json-stage5-container" class="bg-slate-900 border border-slate-700 p-2.5 rounded-lg text-xs text-emerald-300 font-mono overflow-y-auto max-h-80"></pre>
                 </div>
 
-                <!-- Stage 4 Final Re-balanced Output -->
-                <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-lg flex flex-col space-y-2">
-                    <div class="flex justify-between items-center">
-                        <h2 class="font-semibold text-base sm:text-lg text-white">Stage 4: Re-balanced Field Minutes</h2>
-                        <span class="text-xs px-2 py-0.5 rounded bg-emerald-900/60 text-emerald-300 border border-emerald-700 font-mono">Goalies Locked In</span>
-                    </div>
-                    <pre id="json-stage4-container" class="bg-slate-900 border border-slate-700 p-2.5 rounded-lg text-xs text-emerald-300 font-mono flex-grow overflow-y-auto max-h-80">
-                        <!-- Populated dynamically via JS -->
-                    </pre>
-                </div>
-
-            </div>
-
-            <!-- Stage 5 Detailed JSON Output -->
-            <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-lg flex flex-col space-y-2">
-                <h2 class="font-semibold text-base sm:text-lg text-white">Stage 5: JSON Raw Output</h2>
-                <pre id="json-stage5-container" class="bg-slate-900 border border-slate-700 p-2.5 rounded-lg text-xs text-emerald-300 font-mono overflow-y-auto max-h-80"></pre>
             </div>
 
         </div>
+    </main>
 
+    <!-- UNIFIED MOBILE FULL-SCREEN SELECTION MODAL -->
+    <div id="selection-modal" class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/80 backdrop-blur-sm hidden" onclick="closeModal()">
+        <div class="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-lg h-[90vh] flex flex-col shadow-2xl overflow-hidden relative" onclick="event.stopPropagation()">
+            <!-- Fixed Modal Header with Floating Sticky Close Button -->
+            <div class="flex items-center justify-between p-4 border-b border-slate-700 bg-slate-800/90 backdrop-blur sticky top-0 z-10">
+                <div class="pr-6">
+                    <h3 id="modal-title" class="font-bold text-base sm:text-lg text-white">Select Position</h3>
+                    <p id="modal-subtitle" class="text-xs text-slate-400">Choose a constraint or status option below</p>
+                </div>
+                <button onclick="closeModal()" class="w-10 h-10 flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700/60 active:bg-slate-700 rounded-full text-xl font-bold transition">
+                    ✕
+                </button>
+            </div>
+            
+            <!-- Modal Body / Scrolling Options List -->
+            <div id="modal-options-container" class="p-3 sm:p-4 overflow-y-auto flex-grow space-y-2.5 touch-scroll">
+                <!-- Dynamically Inserted Choice Buttons -->
+            </div>
+        </div>
     </div>
 
     <script>
@@ -225,6 +259,20 @@
         }));
 
         let manualConstraints = [];
+
+        // Global position definitions
+        const POSITION_LIST = [
+            { id: 'bench', label: 'Benched / Off Field', icon: '⏸️' },
+            { id: 'G', label: 'G (Goalkeeper)', icon: '🧤' },
+            { id: 'D_L', label: 'D_L (Left Defender)', icon: '🛡️' },
+            { id: 'D_R', label: 'D_R (Right Defender)', icon: '🛡️' },
+            { id: 'M_L', label: 'M_L (Left Midfielder)', icon: '⚡' },
+            { id: 'M_R', label: 'M_R (Right Midfielder)', icon: '⚡' },
+            { id: 'F', label: 'F (Forward)', icon: '⚽' }
+        ];
+
+        // Long-Press Touch Handler Variables
+        let longPressTimer = null;
 
         // =========================================================================
         // TAB CONTROLLER & TOGGLES
@@ -266,7 +314,155 @@
         }
 
         // =========================================================================
-        // UI HELPERS
+        // FULL SCREEN MODAL SYSTEM
+        // =========================================================================
+
+        function openModal(title, subtitle, options, onSelect) {
+            document.getElementById('modal-title').innerText = title;
+            document.getElementById('modal-subtitle').innerText = subtitle || 'Select an option';
+            
+            const container = document.getElementById('modal-options-container');
+            container.innerHTML = '';
+
+            options.forEach(opt => {
+                const btn = document.createElement('button');
+                btn.className = `w-full text-left p-4 rounded-xl border flex items-center justify-between transition active:scale-[0.98] ${
+                    opt.active 
+                    ? 'bg-emerald-950/70 border-emerald-500 text-emerald-200 font-bold shadow-md' 
+                    : 'bg-slate-900/90 border-slate-700/80 hover:border-slate-500 text-slate-100 hover:bg-slate-700/50'
+                }`;
+
+                btn.innerHTML = `
+                    <div class="flex items-center space-x-3">
+                        <span class="text-xl">${opt.icon || '📌'}</span>
+                        <span class="text-sm font-medium">${opt.label}</span>
+                    </div>
+                    ${opt.active ? '<span class="text-emerald-400 font-bold text-lg">✓</span>' : ''}
+                `;
+
+                btn.onclick = () => {
+                    onSelect(opt.value);
+                    closeModal();
+                };
+
+                container.appendChild(btn);
+            });
+
+            document.getElementById('selection-modal').classList.remove('hidden');
+        }
+
+        function closeModal() {
+            document.getElementById('selection-modal').classList.add('hidden');
+        }
+
+        // Modal Triggers
+        function triggerRosterPositionModal(playerIndex) {
+            const player = playerStates[playerIndex];
+            const options = POSITION_LIST.map(p => ({
+                value: p.id,
+                label: p.label,
+                icon: p.icon,
+                active: player.currentPosition === p.id
+            }));
+
+            openModal(
+                `Set Position: ${player.name}`,
+                'Current Field Status',
+                options,
+                (selectedValue) => updatePosition(playerIndex, selectedValue)
+            );
+        }
+
+        function triggerManualConstraintModal(index, field) {
+            const constraint = manualConstraints[index];
+            const currentChunks = generateRemainingChunks(parseInt(document.getElementById('remaining-time').value) || 48);
+
+            if (field === 'playerId') {
+                const options = timbresRoster.map(p => ({
+                    value: p.id,
+                    label: p.name,
+                    icon: '🏃',
+                    active: constraint.playerId === p.id
+                }));
+                openModal('Select Player', 'For manual constraint', options, (val) => updateManualConstraint(index, 'playerId', val));
+            } else if (field === 'chunkId') {
+                const options = currentChunks.map(ch => ({
+                    value: ch.id,
+                    label: `${ch.id} (Q${ch.quarter} - ${ch.duration}m)`,
+                    icon: '⏱️',
+                    active: constraint.chunkId === ch.id
+                }));
+                openModal('Select Chunk', 'Select game quarter chunk', options, (val) => updateManualConstraint(index, 'chunkId', val));
+            } else if (field === 'position') {
+                const options = ALL_POSITIONS.map(p => ({
+                    value: p,
+                    label: p,
+                    icon: p === 'G' ? '🧤' : '⚽',
+                    active: constraint.position === p
+                }));
+                openModal('Select Position', 'For manual constraint', options, (val) => updateManualConstraint(index, 'position', val));
+            }
+        }
+
+        function triggerGridConstraintModal(playerId, chunkId) {
+            const player = timbresRoster.find(p => p.id === playerId);
+            const playerName = player ? player.name : playerId;
+            
+            // Check existing manual constraint if any
+            const existingIndex = manualConstraints.findIndex(c => c.playerId === playerId && c.chunkId === chunkId);
+            const currentPos = existingIndex >= 0 ? manualConstraints[existingIndex].position : 'UNCONSTRAINED';
+
+            const modalOptions = [
+                { value: 'UNCONSTRAINED', label: 'Unconstrained (Auto-Allocate)', icon: '🔄', active: currentPos === 'UNCONSTRAINED' },
+                ...ALL_POSITIONS.map(pos => ({
+                    value: pos,
+                    label: `Force ${pos}`,
+                    icon: pos === 'G' ? '🧤' : '⚽',
+                    active: currentPos === pos
+                }))
+            ];
+
+            openModal(
+                `Constraint: ${playerName}`,
+                `Chunk ${chunkId}`,
+                modalOptions,
+                (selectedPos) => {
+                    if (selectedPos === 'UNCONSTRAINED') {
+                        if (existingIndex >= 0) {
+                            manualConstraints.splice(existingIndex, 1);
+                        }
+                    } else {
+                        if (existingIndex >= 0) {
+                            manualConstraints[existingIndex].position = selectedPos;
+                        } else {
+                            manualConstraints.push({ playerId, chunkId, position: selectedPos });
+                        }
+                    }
+                    renderManualConstraints();
+                    recalculateAll();
+                }
+            );
+        }
+
+        // =========================================================================
+        // LONG-PRESS TOUCH EVENT LISTENERS
+        // =========================================================================
+
+        function handleTouchStart(playerId, chunkId) {
+            longPressTimer = setTimeout(() => {
+                triggerGridConstraintModal(playerId, chunkId);
+            }, 450); // 450ms long press threshold
+        }
+
+        function handleTouchEnd() {
+            if (longPressTimer) {
+                clearTimeout(longPressTimer);
+                longPressTimer = null;
+            }
+        }
+
+        // =========================================================================
+        // UI HELPERS & ROSTER MANAGEMENT
         // =========================================================================
 
         function updateAttendance(index, isAttending) {
@@ -278,9 +474,6 @@
             recalculateAll();
         }
 
-        /**
-         * Updates player goalie willingness preference at runtime.
-         */
         function updateGoaliePref(index, value) {
             playerStates[index].goaliePref = value;
             timbresRoster[index].goaliePref = value;
@@ -303,6 +496,8 @@
                     </select>
                 `;
 
+                const posObj = POSITION_LIST.find(p => p.id === player.currentPosition) || POSITION_LIST[0];
+
                 row.innerHTML = `
                     <td class="p-2.5 text-center">
                         <input type="checkbox" ${player.attending ? 'checked' : ''} onchange="updateAttendance(${index}, this.checked)" class="w-4 h-4 cursor-pointer accent-emerald-500">
@@ -311,40 +506,33 @@
                     <td class="p-2.5">${prefSelect}</td>
                     <td class="p-2.5 text-center">
                         <input type="number" value="${player.prior.G}" min="0" max="60" step="1"
-                            onchange="updatePrior(${index}, 'G', this.value)"
+                            oninput="updatePrior(${index}, 'G', this.value)" onchange="updatePrior(${index}, 'G', this.value)"
                             class="w-14 bg-slate-900 border border-slate-700 rounded px-1.5 py-1 text-center text-white focus:outline-none focus:border-emerald-500"
                             ${!player.attending ? 'disabled' : ''}>
                     </td>
                     <td class="p-2.5 text-center">
                         <input type="number" value="${player.prior.D}" min="0" max="60" step="1"
-                            onchange="updatePrior(${index}, 'D', this.value)"
+                            oninput="updatePrior(${index}, 'D', this.value)" onchange="updatePrior(${index}, 'D', this.value)"
                             class="w-14 bg-slate-900 border border-slate-700 rounded px-1.5 py-1 text-center text-white focus:outline-none focus:border-emerald-500"
                             ${!player.attending ? 'disabled' : ''}>
                     </td>
                     <td class="p-2.5 text-center">
                         <input type="number" value="${player.prior.M}" min="0" max="60" step="1"
-                            onchange="updatePrior(${index}, 'M', this.value)"
+                            oninput="updatePrior(${index}, 'M', this.value)" onchange="updatePrior(${index}, 'M', this.value)"
                             class="w-14 bg-slate-900 border border-slate-700 rounded px-1.5 py-1 text-center text-white focus:outline-none focus:border-emerald-500"
                             ${!player.attending ? 'disabled' : ''}>
                     </td>
                     <td class="p-2.5 text-center">
                         <input type="number" value="${player.prior.F}" min="0" max="60" step="1"
-                            onchange="updatePrior(${index}, 'F', this.value)"
+                            oninput="updatePrior(${index}, 'F', this.value)" onchange="updatePrior(${index}, 'F', this.value)"
                             class="w-14 bg-slate-900 border border-slate-700 rounded px-1.5 py-1 text-center text-white focus:outline-none focus:border-emerald-500"
                             ${!player.attending ? 'disabled' : ''}>
                     </td>
                     <td class="p-2.5">
-                        <select onchange="updatePosition(${index}, this.value)"
-                            class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white focus:outline-none focus:border-emerald-500 text-xs"
-                            ${!player.attending ? 'disabled' : ''}>
-                            <option value="bench" ${player.currentPosition === 'bench' ? 'selected' : ''}>On Bench</option>
-                            <option value="G" ${player.currentPosition === 'G' ? 'selected' : ''}>G (Goalie)</option>
-                            <option value="D_L" ${player.currentPosition === 'D_L' ? 'selected' : ''}>D_L (Left Defender)</option>
-                            <option value="D_R" ${player.currentPosition === 'D_R' ? 'selected' : ''}>D_R (Right Defender)</option>
-                            <option value="M_L" ${player.currentPosition === 'M_L' ? 'selected' : ''}>M_L (Left Midfielder)</option>
-                            <option value="M_R" ${player.currentPosition === 'M_R' ? 'selected' : ''}>M_R (Right Midfielder)</option>
-                            <option value="F" ${player.currentPosition === 'F' ? 'selected' : ''}>F (Forward)</option>
-                        </select>
+                        <button onclick="triggerRosterPositionModal(${index})" ${!player.attending ? 'disabled' : ''} class="w-full text-left bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-white text-xs flex items-center justify-between hover:border-emerald-500 transition">
+                            <span>${posObj.icon} ${posObj.id}</span>
+                            <span class="text-slate-500 text-[10px]">▼</span>
+                        </button>
                     </td>
                 `;
                 tbody.appendChild(row);
@@ -604,16 +792,14 @@
                         const finalSubPos = bestAssignment[index];
                         g.cells[playerId] = { role: 'D_SUB', locked: g.cells[playerId].locked, position: finalSubPos };
                     });
-                } else {
-                    Object.keys(g.cells).forEach(id => {
-                        if (g.cells[id].role === 'D' && !g.cells[id].position) {
-                            g.cells[id].position = 'D_L';
-                        }
-                        if (g.cells[id].role === 'D') {
-                            g.cells[id].role = 'D_SUB';
-                        }
-                    });
                 }
+                
+                Object.keys(g.cells).forEach(id => {
+                    if (g.cells[id].role === 'D') {
+                        if (!g.cells[id].position) g.cells[id].position = 'D_L';
+                        g.cells[id].role = 'D_SUB';
+                    }
+                });
             });
 
             // PASS 6B: Offense Sub-Position Optimization (M_L, M_R, F)
@@ -662,19 +848,18 @@
                         const roleGroup = finalSubPos === 'F' ? 'F_ROLE' : 'O';
                         g.cells[playerId] = { role: roleGroup, locked: g.cells[playerId].locked, position: finalSubPos };
                     });
-                } else {
-                    Object.keys(g.cells).forEach(id => {
-                        if (g.cells[id].role === 'O') {
-                            if (!g.cells[id].position) g.cells[id].position = 'M_L';
-                            if (g.cells[id].position === 'F') {
-                                g.cells[id].role = 'F_ROLE';
-                            }
-                        }
-                    });
                 }
+                
+                Object.keys(g.cells).forEach(id => {
+                    if (g.cells[id].role === 'O') {
+                        if (!g.cells[id].position) g.cells[id].position = 'M_L';
+                        if (g.cells[id].position === 'F') {
+                            g.cells[id].role = 'F_ROLE';
+                        }
+                    }
+                });
             });
 
-            // Validation warnings
             payload.roster.forEach(p => {
                 const s = stats[p.id];
                 const fieldMins = s.D + s.O + s.Flex;
@@ -714,40 +899,29 @@
                 warnings
             };
 
-            // Run Stage 6 Left vs. Right Consistency Cleanup Pass
             grid = runStage6ConsistencyPass(grid, payload);
 
             return { grid, stats, roster: payload.roster, warnings, json };
         }
 
-        /**
-         * Renders end-of-game minute summaries per player into DOM inside the Calculations Tab.
-         */
         function renderPlayerSummaryReport(stage5) {
             let container = document.getElementById('stage5-player-summary');
-            if (!container) {
-                const calcTab = document.getElementById('tab-calculations');
-                if (!calcTab) return;
-                container = document.createElement('div');
-                container.id = 'stage5-player-summary';
-                container.className = 'bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-lg overflow-x-auto';
-                calcTab.appendChild(container);
-            }
+            if (!container) return;
 
             const low = v => v < MIN_POSITION_MINS ? 'text-rose-400 font-bold' : '';
             let html = `
                 <h3 class="text-xs font-bold text-slate-300 uppercase tracking-wider mb-1">Projected End-of-Game Minutes</h3>
-                <p class="text-[11px] text-slate-500 mb-3">Includes minutes already played. Defense / Offense below ${MIN_POSITION_MINS}m shown in red (ignoring players with no field time).</p>
+                <p class="text-[11px] text-slate-500 mb-3">Includes minutes already played. Defense / Offense below ${MIN_POSITION_MINS}m shown in red.</p>
                 <table class="w-full text-left text-xs">
                     <thead>
                         <tr class="text-slate-500 border-b border-slate-800">
                             <th class="pb-2">Player</th>
-                            <th class="pb-2 text-center">Played So Far</th>
+                            <th class="pb-2 text-center">Played</th>
                             <th class="pb-2 text-center">Remaining</th>
-                            <th class="pb-2 text-center">Final Total</th>
+                            <th class="pb-2 text-center">Total</th>
                             <th class="pb-2 text-center text-rose-400">Goalie</th>
                             <th class="pb-2 text-center text-emerald-400">Defense</th>
-                            <th class="pb-2 text-center text-sky-400">Offense (M/F)</th>
+                            <th class="pb-2 text-center text-sky-400">Offense</th>
                             <th class="pb-2 text-center text-amber-400">Flex</th>
                         </tr>
                     </thead>
@@ -773,7 +947,7 @@
             });
             html += `
                         <tr class="border-t border-slate-600 text-slate-400">
-                            <td class="py-1.5 font-semibold">Team total</td>
+                            <td class="py-1.5 font-semibold">Total</td>
                             <td class="py-1.5 text-center font-semibold">${sums.played}m</td>
                             <td class="py-1.5 text-center font-semibold">${sums.rem}m</td>
                             <td class="py-1.5 text-center font-semibold">${sums.total}m</td>
@@ -791,9 +965,6 @@
             container.innerHTML = html;
         }
 
-        /**
-         * Helper function to format sub-position labels with subscript Left/Right indicators.
-         */
         function formatPositionLabel(pos) {
             if (!pos) return '–';
             return pos
@@ -801,9 +972,6 @@
                 .replace('_R', '<sub class="text-[8px] sm:text-[9px] font-semibold">R</sub>');
         }
 
-        /**
-         * Renders Stage 5 chunk matrix visualization in the Lineup Tab.
-         */
         function renderStage5Visual(stage5) {
             const container = document.getElementById('stage5-visual-container');
             if (!container) return;
@@ -811,16 +979,18 @@
 
             const roleStyle = {
                 G: 'bg-rose-900/60 text-rose-200 border border-rose-700/50',
+                D: 'bg-emerald-900/60 text-emerald-200 border border-emerald-700/50',
                 D_SUB: 'bg-emerald-900/60 text-emerald-200 border border-emerald-700/50',
                 O: 'bg-sky-900/60 text-sky-200 border border-sky-700/50',
+                F: 'bg-orange-900/60 text-orange-200 border border-orange-700/50',
                 F_ROLE: 'bg-orange-900/60 text-orange-200 border border-orange-700/50',
                 Flex: 'bg-amber-900/50 text-amber-200 border border-amber-700/50',
                 Bench: 'text-slate-600'
             };
 
-            let html = `<table class="w-full text-xs text-center border-separate" style="border-spacing:1px">
+            let html = `<table class="w-full text-xs text-center border-separate" style="border-spacing:2px">
                 <thead><tr class="text-slate-400"><th class="text-left pb-1 text-xs sm:text-sm font-semibold text-slate-300 pr-1">Player</th>
-                ${stage5.grid.map(g => `<th class="pb-1 bg-slate-900/60 rounded px-0.5 py-1 min-w-[28px]"><div class="font-bold text-emerald-400 text-[11px] leading-tight">${g.chunk.id}</div><div class="font-normal text-[9px] text-slate-400 leading-tight">${g.chunk.duration}m</div></th>`).join('')}
+                ${stage5.grid.map(g => `<th class="pb-1 bg-slate-900/60 rounded px-0.5 py-1 min-w-[32px]"><div class="font-bold text-emerald-400 text-[11px] leading-tight">${g.chunk.id}</div><div class="font-normal text-[9px] text-slate-400 leading-tight">${g.chunk.duration}m</div></th>`).join('')}
                 </tr></thead><tbody>`;
             
             stage5.roster.forEach(p => {
@@ -829,7 +999,16 @@
                     const cell = g.cells[p.id];
                     const posStr = cell.role === 'Bench' ? '–' : (cell.position || cell.role);
                     const formattedPos = formatPositionLabel(posStr);
-                    html += `<td class="rounded py-1 px-0.5 font-mono font-medium text-[11px] sm:text-xs ${roleStyle[cell.role] || 'text-slate-400'}">${formattedPos}${cell.locked && cell.role !== 'G' ? '*' : ''}</td>`;
+                    
+                    // Attach long press and context menu event listeners to cell
+                    html += `<td 
+                        ontouchstart="handleTouchStart('${p.id}', '${g.chunk.id}')"
+                        ontouchend="handleTouchEnd()"
+                        ontouchmove="handleTouchEnd()"
+                        oncontextmenu="event.preventDefault(); triggerGridConstraintModal('${p.id}', '${g.chunk.id}')"
+                        class="rounded py-1.5 px-0.5 font-mono font-medium text-[11px] sm:text-xs select-none cursor-pointer active:opacity-70 transition ${roleStyle[cell.role] || 'text-slate-400'}">
+                        ${formattedPos}${cell.locked && cell.role !== 'G' ? '*' : ''}
+                    </td>`;
                 });
                 html += `</tr>`;
             });
@@ -862,7 +1041,9 @@
         }
 
         function addManualConstraintRow() {
-            manualConstraints.push({ playerId: timbresRoster[0].id, chunkId: 'Q3-1', position: 'G' });
+            const currentChunks = generateRemainingChunks(parseInt(document.getElementById('remaining-time').value) || 48);
+            const defaultChunkId = currentChunks.length > 0 ? currentChunks[0].id : 'Q1-1';
+            manualConstraints.push({ playerId: timbresRoster[0].id, chunkId: defaultChunkId, position: 'G' });
             renderManualConstraints();
             recalculateAll();
         }
@@ -883,52 +1064,39 @@
             container.innerHTML = '';
 
             if (manualConstraints.length === 0) {
-                container.innerHTML = '<div class="text-xs text-slate-500 italic">No manual constraints added yet. Click "+ Add Constraint" to force specific player-quarter positions.</div>';
+                container.innerHTML = '<div class="text-xs text-slate-500 italic">No manual constraints added yet. Click "+ Add Constraint" or long-press on grid cells.</div>';
                 return;
             }
 
-            const currentChunks = generateRemainingChunks(parseInt(document.getElementById('remaining-time').value) || 48);
-
             manualConstraints.forEach((c, index) => {
+                const player = timbresRoster.find(p => p.id === c.playerId);
+                const playerName = player ? player.name : c.playerId;
+
                 const row = document.createElement('div');
-                row.className = 'flex items-center gap-2 sm:gap-3 bg-slate-900 p-2 sm:p-2.5 rounded-lg border border-slate-700 text-xs sm:text-sm';
+                row.className = 'flex items-center justify-between bg-slate-900 p-2 sm:p-2.5 rounded-lg border border-slate-700 text-xs sm:text-sm';
                 
-                let playerSelect = `<select onchange="updateManualConstraint(${index}, 'playerId', this.value)" class="bg-slate-800 border border-slate-700 rounded px-1.5 py-1 text-white text-xs">`;
-                timbresRoster.forEach(p => {
-                    playerSelect += `<option value="${p.id}" ${p.id === c.playerId ? 'selected' : ''}>${p.name}</option>`;
-                });
-                playerSelect += `</select>`;
-
-                let chunkSelect = `<select onchange="updateManualConstraint(${index}, 'chunkId', this.value)" class="bg-slate-800 border border-slate-700 rounded px-1.5 py-1 text-white text-xs">`;
-                currentChunks.forEach(ch => {
-                    chunkSelect += `<option value="${ch.id}" ${ch.id === c.chunkId ? 'selected' : ''}>${ch.id}</option>`;
-                });
-                chunkSelect += `</select>`;
-
-                let posSelect = `<select onchange="updateManualConstraint(${index}, 'position', this.value)" class="bg-slate-800 border border-slate-700 rounded px-1.5 py-1 text-white text-xs">
-                    <option value="G" ${c.position === 'G' ? 'selected' : ''}>G</option>
-                    <option value="D_L" ${c.position === 'D_L' ? 'selected' : ''}>D_L</option>
-                    <option value="D_R" ${c.position === 'D_R' ? 'selected' : ''}>D_R</option>
-                    <option value="M_L" ${c.position === 'M_L' ? 'selected' : ''}>M_L</option>
-                    <option value="M_R" ${c.position === 'M_R' ? 'selected' : ''}>M_R</option>
-                    <option value="F" ${c.position === 'F' ? 'selected' : ''}>F</option>
-                </select>`;
-
                 row.innerHTML = `
-                    <div class="flex-grow flex items-center gap-1.5 sm:gap-2 flex-wrap">
-                        <span class="text-xs text-slate-400">Player:</span> ${playerSelect}
-                        <span class="text-xs text-slate-400 ml-1">Chunk:</span> ${chunkSelect}
-                        <span class="text-xs text-slate-400 ml-1">Pos:</span> ${posSelect}
+                    <div class="flex items-center space-x-2 overflow-x-auto">
+                        <button onclick="triggerManualConstraintModal(${index}, 'playerId')" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-white font-medium hover:border-emerald-500">
+                            ${playerName}
+                        </button>
+                        <span class="text-slate-500">in</span>
+                        <button onclick="triggerManualConstraintModal(${index}, 'chunkId')" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-white font-medium hover:border-emerald-500">
+                            ${c.chunkId}
+                        </button>
+                        <span class="text-slate-500">at</span>
+                        <button onclick="triggerManualConstraintModal(${index}, 'position')" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 font-bold text-emerald-400 hover:border-emerald-500">
+                            ${c.position}
+                        </button>
                     </div>
-                    <button onclick="removeManualConstraintRow(${index})" class="text-xs text-rose-400 hover:text-rose-300 px-1.5 py-1 font-bold">✕</button>
+                    <button onclick="removeManualConstraintRow(${index})" class="text-xs text-rose-400 hover:text-rose-300 p-1 font-bold ml-2">
+                        ✕
+                    </button>
                 `;
                 container.appendChild(row);
             });
         }
 
-        /**
-         * Breaks remaining game minutes into standard 6-minute chunks per quarter.
-         */
         function generateRemainingChunks(remainingTimeTotal, totalGameTime = 48) {
             const standardChunks = [
                 { id: 'Q1-1', quarter: 1, duration: 6 },
@@ -970,9 +1138,6 @@
             return activeChunks;
         }
 
-        /**
-         * Stage 0: Propagates forced slot constraints across sibling chunks in the same quarter.
-         */
         function propagateConstraintsWithinQuarter(payload) {
             const propagated = [];
             const originals = [...payload.constraints];
@@ -998,9 +1163,6 @@
 
         const ALL_POSITIONS = ['G', 'D_L', 'D_R', 'M_L', 'M_R', 'F'];
 
-        /**
-         * Validates if partial mid-quarter chunks have all 6 positions explicitly specified.
-         */
         function checkPartialChunksFullyAssigned(payload) {
             const problems = [];
             payload.remainingChunks.filter(ch => ch.isPartial).forEach(ch => {
@@ -1013,9 +1175,6 @@
             return problems;
         }
 
-        /**
-         * Stage 1: Assembles input payload and resolves live field vs manual constraint conflicts.
-         */
         function buildPipelinePayload() {
             const remainingTimeTotal = parseInt(document.getElementById('remaining-time').value) || 48;
             const chunks = generateRemainingChunks(remainingTimeTotal);
@@ -1091,9 +1250,6 @@
             goaliePreferredOnTie: true
         };
 
-        /**
-         * Fallback chunk-walk greedy balancer when exact block leveling cannot place all slots.
-         */
         function greedyBalanceMinutesChunkWalk(payload, activeConstraints) {
             let totalMinutesMap = {};
             payload.roster.forEach(p => {
@@ -1168,9 +1324,6 @@
             };
         }
 
-        /**
-         * Augmenting path network flow check to verify if demand allocation is placeable.
-         */
         function canPlaceRemaining(demand, freeCap, forbidden, chunkIds, fromIdx, excludedNow, playerIds, exact = true) {
             const chunkList = [];
             for (let j = fromIdx; j < chunkIds.length; j++) chunkList.push(j);
@@ -1222,9 +1375,6 @@
             return true;
         }
 
-        /**
-         * Stages 2 & 4 Core Algorithm: Level playing time across roster using block counts.
-         */
         function levelByBlockCount(payload, activeConstraints) {
             const chunks = payload.remainingChunks;
             const N = chunks.length;
@@ -1326,9 +1476,6 @@
             };
         }
 
-        /**
-         * Main minute leveling orchestrator. Tries block leveling first, falls back to chunk walk.
-         */
         function greedyBalanceMinutes(payload, activeConstraints) {
             if (levelingOptions.method === 'blocks') {
                 const result = levelByBlockCount(payload, activeConstraints);
@@ -1340,9 +1487,6 @@
             return fallback;
         }
 
-        /**
-         * Stage 3: Allocates Goalies quarter-by-quarter based on exclusivity filters & prior goalie minutes.
-         */
         function allocateGoalies(payload, stage2Output) {
             let quartersMap = {};
             payload.remainingChunks.forEach(chunk => {
@@ -1445,9 +1589,6 @@
             };
         }
 
-        /**
-         * Renders list of remaining chunks in UI.
-         */
         function renderChunks(chunks) {
             const container = document.getElementById('chunks-container');
             container.innerHTML = '';
@@ -1472,23 +1613,6 @@
             });
         }
 
-        /**
-         * Helper to retrieve player's side ('L' or 'R') from previous chunks for consistency pass.
-         */
-        function getPlayerPreviousSide(grid, currentChunkIdx, playerId) {
-            for (let i = currentChunkIdx - 1; i >= 0; i--) {
-                const prevCell = grid[i].cells[playerId];
-                if (prevCell && prevCell.position) {
-                    if (prevCell.position.endsWith('_L')) return 'L';
-                    if (prevCell.position.endsWith('_R')) return 'R';
-                }
-            }
-            return null;
-        }
-
-        /**
-         * Stage 6 Consistency Pass: Prevents unnecessary left/right side swapping between consecutive chunks.
-         */
         function runStage6ConsistencyPass(grid, payload) {
             const sideSlots = ['D_L', 'D_R', 'M_L', 'M_R'];
 
@@ -1505,7 +1629,7 @@
                     const currCell = g.cells[playerId];
                     const currPos = currCell.position;
                     const currSide = currPos.endsWith('_L') ? 'L' : 'R';
-                    const group = currPos.charAt(0); // 'D' or 'M'
+                    const group = currPos.charAt(0);
 
                     const prevCell = prevGrid.cells[playerId];
                     
@@ -1540,9 +1664,6 @@
             return grid;
         }
 
-        /**
-         * Top-level pipeline engine orchestrator. Triggers execution through Stages 0-6.
-         */
         function recalculateAll() {
             const remainingTime = parseInt(document.getElementById('remaining-time').value) || 48;
             const chunks = generateRemainingChunks(remainingTime);
@@ -1605,12 +1726,10 @@
             renderStage5Visual(stage5Output);
         }
 
-        // Initialize UI components on boot
+        // Boot Init
         renderRoster();
         renderManualConstraints();
         recalculateAll();
-        
-        // Apply debug mode toggle on boot
         toggleDebugMode();
     </script>
 </body>
