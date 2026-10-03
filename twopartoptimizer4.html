@@ -685,6 +685,13 @@
             };
         }
 
+        // Leveling knobs for the free-slot picker (Stage 2/4)
+        const levelingOptions = {
+            goalieCreditFraction: 0.5,    // share of a forced GOALIE chunk counted up front (1 = all)
+            otherForcedCreditFraction: 1, // share of other forced chunks counted up front
+            goaliePreferredOnTie: true    // on equal minutes, prefer players with a goalie chunk still ahead
+        };
+
         function greedyBalanceMinutes(payload, activeConstraints) {
             let totalMinutesMap = {};
             payload.roster.forEach(p => {
@@ -701,29 +708,37 @@
             // STEP A: Credit every forced allocation (goalie, live field, manual, propagated) up front.
             // Those players "already owe" this time, so the free-slot picks below see their real
             // end-of-game load instead of discovering it only when the chunk is reached.
-            const forcedByChunk = {};   // chunkId -> Set of forced playerIds
-            payload.remainingChunks.forEach(chunk => { forcedByChunk[chunk.id] = new Set(); });
+            const forcedByChunk = {};   // chunkId -> Map(playerId -> {credit, isGoalie})
+            payload.remainingChunks.forEach(chunk => { forcedByChunk[chunk.id] = new Map(); });
             activeConstraints.forEach(c => {
                 const chunk = payload.remainingChunks.find(ch => ch.id === c.chunkId);
                 if (!chunk || forcedByChunk[chunk.id].has(c.playerId)) return;
-                forcedByChunk[chunk.id].add(c.playerId);
-                futureMinutesMap[c.playerId] = (futureMinutesMap[c.playerId] || 0) + chunk.duration;
-                totalMinutesMap[c.playerId] = (totalMinutesMap[c.playerId] || 0) + chunk.duration;
+                const isGoalie = c.position === 'G';
+                const frac = isGoalie ? levelingOptions.goalieCreditFraction : levelingOptions.otherForcedCreditFraction;
+                const credit = chunk.duration * frac;
+                forcedByChunk[chunk.id].set(c.playerId, { credit, isGoalie });
+                futureMinutesMap[c.playerId] = (futureMinutesMap[c.playerId] || 0) + chunk.duration;   // true minutes
+                totalMinutesMap[c.playerId] = (totalMinutesMap[c.playerId] || 0) + credit;            // leveling score
             });
 
             // STEP B: Walk the chunks. Forced players are already counted; only the players we pick
             // for the open slots get minutes added here.
             payload.remainingChunks.forEach((chunk, chunkIndex) => {
-                const playersPlayingInChunk = new Set(forcedByChunk[chunk.id]);
+                const playersPlayingInChunk = new Set(forcedByChunk[chunk.id].keys());
+
+                // Reaching a forced chunk: the part we didn't count up front is now played, so count it.
+                forcedByChunk[chunk.id].forEach((info, playerId) => {
+                    totalMinutesMap[playerId] += chunk.duration - info.credit;
+                });
 
                 // Scarcity: how many LATER chunks could this player still be picked for freely?
-                // (Chunks where they are already forced don't count.) On a tie in minutes, the player
-                // with fewer chances left goes first, so they aren't stranded below everyone else.
+                // Goalie-ahead: does this player still have a forced goalie chunk later on?
                 const laterFreeChunks = {};
+                const goalieAhead = {};
                 payload.roster.forEach(p => {
-                    laterFreeChunks[p.id] = payload.remainingChunks
-                        .slice(chunkIndex + 1)
-                        .filter(ch => !forcedByChunk[ch.id].has(p.id)).length;
+                    const later = payload.remainingChunks.slice(chunkIndex + 1);
+                    laterFreeChunks[p.id] = later.filter(ch => !forcedByChunk[ch.id].has(p.id)).length;
+                    goalieAhead[p.id] = later.some(ch => forcedByChunk[ch.id].has(p.id) && forcedByChunk[ch.id].get(p.id).isGoalie) ? 1 : 0;
                 });
 
                 const totalFieldSlots = 6;   // goalie + 5 field
@@ -736,6 +751,7 @@
                         const minA = totalMinutesMap[a.id] || 0;
                         const minB = totalMinutesMap[b.id] || 0;
                         if (minA !== minB) return minA - minB;
+                        if (levelingOptions.goaliePreferredOnTie && goalieAhead[a.id] !== goalieAhead[b.id]) return goalieAhead[b.id] - goalieAhead[a.id];
                         if (laterFreeChunks[a.id] !== laterFreeChunks[b.id]) return laterFreeChunks[a.id] - laterFreeChunks[b.id];
                         return a.id.localeCompare(b.id);
                     });
