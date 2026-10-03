@@ -19,6 +19,20 @@
             -webkit-user-select: none;
             user-select: none;
         }
+        /* No long-press callout / text selection anywhere except where you actually type or copy */
+        html, body {
+            overscroll-behavior: none;            /* no pull-to-refresh / swipe-history overscroll */
+            -webkit-tap-highlight-color: transparent;
+        }
+        body { -webkit-touch-callout: none; }
+        button, table, th, td, label, summary, h1, h2, h3, p, span, div {
+            -webkit-user-select: none;
+            user-select: none;
+        }
+        input, textarea, select, pre {
+            -webkit-user-select: text;
+            user-select: text;
+        }
     </style>
 </head>
 <body class="bg-slate-900 text-slate-100 font-sans h-screen flex flex-col overflow-hidden">
@@ -127,6 +141,9 @@
                             <h2 class="font-semibold text-base sm:text-lg text-white">Lineup Assignment Matrix</h2>
                             <p class="text-xs text-slate-400">Tap and hold any slot to edit/override player constraints.</p>
                         </div>
+                        <button onclick="confirmClearConstraints()" class="text-xs bg-slate-700 hover:bg-slate-600 text-rose-300 px-2.5 py-1.5 rounded-lg border border-slate-600 transition whitespace-nowrap">
+                            Clear constraints
+                        </button>
                     </div>
 
                     <!-- Visual container for DOM rendering -->
@@ -213,7 +230,7 @@
     </main>
 
     <!-- UNIFIED MOBILE FULL-SCREEN SELECTION MODAL -->
-    <div id="selection-modal" class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/80 backdrop-blur-sm hidden" onclick="closeModal()">
+    <div id="selection-modal" class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/80 backdrop-blur-sm hidden">
         <div class="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-lg h-[90vh] flex flex-col shadow-2xl overflow-hidden relative" onclick="event.stopPropagation()">
             <!-- Fixed Modal Header with Floating Sticky Close Button -->
             <div class="flex items-center justify-between p-4 border-b border-slate-700 bg-slate-800/90 backdrop-blur sticky top-0 z-10">
@@ -221,7 +238,7 @@
                     <h3 id="modal-title" class="font-bold text-base sm:text-lg text-white">Select Position</h3>
                     <p id="modal-subtitle" class="text-xs text-slate-400">Choose a constraint or status option below</p>
                 </div>
-                <button onclick="closeModal()" class="w-10 h-10 flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700/60 active:bg-slate-700 rounded-full text-xl font-bold transition">
+                <button id="modal-close-btn" class="w-10 h-10 flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700/60 active:bg-slate-700 rounded-full text-xl font-bold transition">
                     ✕
                 </button>
             </div>
@@ -317,7 +334,29 @@
         // FULL SCREEN MODAL SYSTEM
         // =========================================================================
 
+        // A click only counts if the press that produced it STARTED on that element, after the modal
+        // was already showing. A long press on the grid opens the modal while the finger is still down;
+        // when the finger lifts, the browser sends a click to whatever is now under it (an option, the
+        // backdrop, the close button). That leftover click has no matching pointerdown, so it is ignored.
+        // Keyboard activation (Enter/Space) has click.detail === 0 and is always allowed.
+        let modalSession = 0;
+        function onCleanTap(el, handler, selfOnly = false) {
+            let pressedInSession = -1;
+            el.addEventListener('pointerdown', (e) => {
+                if (!selfOnly || e.target === el) pressedInSession = modalSession;
+            });
+            el.addEventListener('pointercancel', () => { pressedInSession = -1; });
+            el.addEventListener('click', (e) => {
+                if (selfOnly && e.target !== el) return;
+                const fromKeyboard = e.detail === 0;
+                if (!fromKeyboard && pressedInSession !== modalSession) return;   // leftover click from the long press
+                pressedInSession = -1;
+                handler(e);
+            });
+        }
+
         function openModal(title, subtitle, options, onSelect) {
+            modalSession++;
             document.getElementById('modal-title').innerText = title;
             document.getElementById('modal-subtitle').innerText = subtitle || 'Select an option';
             
@@ -340,10 +379,10 @@
                     ${opt.active ? '<span class="text-emerald-400 font-bold text-lg">✓</span>' : ''}
                 `;
 
-                btn.onclick = () => {
+                onCleanTap(btn, () => {
                     onSelect(opt.value);
                     closeModal();
-                };
+                });
 
                 container.appendChild(btn);
             });
@@ -394,17 +433,21 @@
                 }));
                 openModal('Select Chunk', 'Select game quarter chunk', options, (val) => updateManualConstraint(index, 'chunkId', val));
             } else if (field === 'position') {
-                const options = ALL_POSITIONS.map(p => ({
-                    value: p,
-                    label: p,
-                    icon: p === 'G' ? '🧤' : '⚽',
-                    active: constraint.position === p
-                }));
+                const options = [
+                    ...ALL_POSITIONS.map(p => ({
+                        value: p,
+                        label: p,
+                        icon: p === 'G' ? '🧤' : '⚽',
+                        active: constraint.position === p
+                    })),
+                    { value: BENCH_VALUE, label: 'Benched (off the field)', icon: '⏸️', active: constraint.position === BENCH_VALUE }
+                ];
                 openModal('Select Position', 'For manual constraint', options, (val) => updateManualConstraint(index, 'position', val));
             }
         }
 
         function triggerGridConstraintModal(playerId, chunkId) {
+            if (!document.getElementById('selection-modal').classList.contains('hidden')) return;   // already open (long-press can fire twice)
             const player = timbresRoster.find(p => p.id === playerId);
             const playerName = player ? player.name : playerId;
             
@@ -414,6 +457,7 @@
 
             const modalOptions = [
                 { value: 'UNCONSTRAINED', label: 'Unconstrained (Auto-Allocate)', icon: '🔄', active: currentPos === 'UNCONSTRAINED' },
+                { value: BENCH_VALUE, label: 'Benched (off the field)', icon: '⏸️', active: currentPos === BENCH_VALUE },
                 ...ALL_POSITIONS.map(pos => ({
                     value: pos,
                     label: `Force ${pos}`,
@@ -584,19 +628,27 @@
                 playerIds.forEach(id => {
                     const c = chunkConstraints.find(x => x.playerId === id);
                     if (c && c.position === 'G') {
-                        cells[id] = { role: 'G', locked: true, position: 'G' };
+                        // pipeline: true when the planner (Stage 3) chose this goalie, false when it came from you
+                        // (live field, manual, or copied across the quarter from one of those)
+                        cells[id] = { role: 'G', locked: true, position: 'G', starred: isDirectConstraint(c) };
                         stats[id].G += chunk.duration;
                     } else if (c && c.position.startsWith('D')) {
-                        cells[id] = { role: 'D', locked: true, position: c.position };
+                        cells[id] = { role: 'D', locked: true, position: c.position, starred: isDirectConstraint(c) };
                         stats[id].D += chunk.duration; lockedD++;
                     } else if (c) {
-                        cells[id] = { role: 'O', locked: true, position: c.position };
+                        cells[id] = { role: 'O', locked: true, position: c.position, starred: isDirectConstraint(c) };
                         stats[id].O += chunk.duration; lockedO++;
                     } else {
                         cells[id] = { role: null, locked: false };
                         stats[id].pending += chunk.duration;
                     }
                     stats[id].futureMinutes += chunk.duration;
+                });
+
+                (payload.benched || []).filter(b => b.chunkId === chunk.id).forEach(b => {
+                    if (cells[b.playerId] && cells[b.playerId].role === 'Bench') {
+                        cells[b.playerId] = { role: 'Bench', locked: true, starred: b.source === 'manual' };
+                    }
                 });
 
                 if (!goalieC) warnings.push(`${chunk.id}: no goalie assigned.`);
@@ -985,7 +1037,8 @@
                 F: 'bg-orange-900/60 text-orange-200 border border-orange-700/50',
                 F_ROLE: 'bg-orange-900/60 text-orange-200 border border-orange-700/50',
                 Flex: 'bg-amber-900/50 text-amber-200 border border-amber-700/50',
-                Bench: 'text-slate-600'
+                Bench: 'text-slate-600',
+                BENCH_SET: 'text-slate-300 border border-dashed border-slate-500'
             };
 
             let html = `<table class="w-full text-xs text-center border-separate" style="border-spacing:2px">
@@ -1006,15 +1059,15 @@
                         ontouchend="handleTouchEnd()"
                         ontouchmove="handleTouchEnd()"
                         oncontextmenu="event.preventDefault(); triggerGridConstraintModal('${p.id}', '${g.chunk.id}')"
-                        class="rounded py-1.5 px-0.5 font-mono font-medium text-[11px] sm:text-xs select-none cursor-pointer active:opacity-70 transition ${roleStyle[cell.role] || 'text-slate-400'}">
-                        ${formattedPos}${cell.locked && cell.role !== 'G' ? '*' : ''}
+                        class="rounded py-1.5 px-0.5 font-mono font-medium text-[11px] sm:text-xs select-none cursor-pointer active:opacity-70 transition ${(cell.role === 'Bench' && cell.starred) ? roleStyle.BENCH_SET : (roleStyle[cell.role] || 'text-slate-400')}">
+                        ${formattedPos}${cell.starred ? '*' : ''}
                     </td>`;
                 });
                 html += `</tr>`;
             });
             html += `</tbody></table>
                 <div class="text-[10px] sm:text-[11px] text-slate-400 mt-2 pt-1.5 border-t border-slate-700/60 flex gap-2 sm:gap-4 flex-wrap">
-                    <span>* = hard constraint</span>
+                    <span>* = constrained by you (live field / manual)</span>
                     <span class="text-rose-300 font-semibold">G = goalie</span>
                     <span class="text-emerald-300 font-semibold">D<sub>L</sub>/D<sub>R</sub> = defense</span>
                     <span class="text-sky-300 font-semibold">M<sub>L</sub>/M<sub>R</sub> = midfielder</span>
@@ -1032,6 +1085,41 @@
         function updatePosition(index, value) {
             playerStates[index].currentPosition = value;
             recalculateAll();
+        }
+
+        function confirmClearConstraints() {
+            const manualCount = manualConstraints.length;
+            const liveCount = playerStates.filter(p => p.currentPosition !== 'bench').length;
+            const s = n => (n === 1 ? '' : 's');
+
+            const options = [{ value: 'cancel', label: 'Cancel (keep everything)', icon: '↩️', active: false }];
+            if (manualCount > 0) {
+                options.push({ value: 'manual', label: `Clear ${manualCount} manual constraint${s(manualCount)}`, icon: '🗑️' });
+            }
+            if (liveCount > 0) {
+                options.push({
+                    value: 'all',
+                    icon: '🗑️',
+                    label: manualCount > 0
+                        ? `Clear manual constraints AND reset ${liveCount} live field position${s(liveCount)}`
+                        : `Reset ${liveCount} live field position${s(liveCount)}`
+                });
+            }
+
+            const nothingToClear = manualCount === 0 && liveCount === 0;
+            openModal(
+                'Clear constraints?',
+                nothingToClear ? 'There are no constraints to clear.' : 'This cannot be undone.',
+                options,
+                (choice) => {
+                    if (choice === 'cancel') return;
+                    manualConstraints.length = 0;
+                    if (choice === 'all') playerStates.forEach(p => { p.currentPosition = 'bench'; });
+                    renderRoster();
+                    renderManualConstraints();
+                    recalculateAll();
+                }
+            );
         }
 
         function resetPriorMinutes() {
@@ -1086,7 +1174,7 @@
                         </button>
                         <span class="text-slate-500">at</span>
                         <button onclick="triggerManualConstraintModal(${index}, 'position')" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 font-bold text-emerald-400 hover:border-emerald-500">
-                            ${c.position}
+                            ${c.position === BENCH_VALUE ? 'Benched' : c.position}
                         </button>
                     </div>
                     <button onclick="removeManualConstraintRow(${index})" class="text-xs text-rose-400 hover:text-rose-300 p-1 font-bold ml-2">
@@ -1151,10 +1239,23 @@
                 chunksByQuarter[chunk.quarter].filter(id => id !== c.chunkId).forEach(siblingId => {
                     const slotTaken = payload.constraints.some(x => x.chunkId === siblingId && x.position === c.position);
                     const playerBusy = payload.constraints.some(x => x.chunkId === siblingId && x.playerId === c.playerId);
-                    if (slotTaken || playerBusy) return;
+                    const benchedThere = isBenchedIn(payload, c.playerId, siblingId);   // an explicit bench wins
+                    if (slotTaken || playerBusy || benchedThere) return;
                     const copy = { playerId: c.playerId, position: c.position, chunkId: siblingId, source: 'propagated' };
                     payload.constraints.push(copy);
                     propagated.push({ from: c.chunkId, to: siblingId, playerId: c.playerId, position: c.position });
+                });
+            });
+            // Benches copy to the other half of the quarter too, unless that player is already placed there
+            (payload.benched || []).slice().forEach(b => {
+                const chunk = payload.remainingChunks.find(ch => ch.id === b.chunkId);
+                if (!chunk) return;
+                chunksByQuarter[chunk.quarter].filter(id => id !== b.chunkId).forEach(siblingId => {
+                    const busy = payload.constraints.some(x => x.chunkId === siblingId && x.playerId === b.playerId)
+                        || isBenchedIn(payload, b.playerId, siblingId);
+                    if (busy) return;
+                    payload.benched.push({ playerId: b.playerId, chunkId: siblingId, source: 'propagated' });
+                    propagated.push({ from: b.chunkId, to: siblingId, playerId: b.playerId, position: BENCH_VALUE });
                 });
             });
             payload.propagated = propagated;
@@ -1162,6 +1263,15 @@
         }
 
         const ALL_POSITIONS = ['G', 'D_L', 'D_R', 'M_L', 'M_R', 'F'];
+        // A "*" marks a cell YOU constrained (live field or manual). Cells that are only locked because a
+        // constraint was copied across the quarter, or because the planner chose the goalie, get no star.
+        function isDirectConstraint(c) { return c.source === 'manual' || c.source === 'live_field'; }
+        // "Benched" is a constraint of a different kind: it keeps a player OFF the field for a chunk and
+        // uses up no slot. It is stored in payload.benched, not payload.constraints.
+        const BENCH_VALUE = 'BENCH';
+        function isBenchedIn(payload, playerId, chunkId) {
+            return (payload.benched || []).some(b => b.playerId === playerId && b.chunkId === chunkId);
+        }
 
         function checkPartialChunksFullyAssigned(payload) {
             const problems = [];
@@ -1175,11 +1285,35 @@
             return problems;
         }
 
+        // Hard rules for benches: every chunk still needs 6 available players, and the player who is
+        // goalie for a quarter can't be benched in either half of it.
+        function checkBenchRules(payload) {
+            const problems = [];
+            payload.remainingChunks.forEach(ch => {
+                const benchedHere = (payload.benched || []).filter(b => b.chunkId === ch.id).length;
+                const available = payload.roster.length - benchedHere;
+                if (benchedHere > 0 && available < 6) {
+                    problems.push(`${ch.id}: only ${available} players are available (6 needed) with ${benchedHere} benched.`);
+                }
+            });
+            payload.constraints.filter(c => c.position === 'G').forEach(g => {
+                const chunk = payload.remainingChunks.find(ch => ch.id === g.chunkId);
+                if (!chunk) return;
+                payload.remainingChunks.filter(ch => ch.quarter === chunk.quarter && ch.id !== chunk.id).forEach(other => {
+                    if (isBenchedIn(payload, g.playerId, other.id)) {
+                        problems.push(`${g.playerId} is goalie in ${chunk.id} (so for all of Q${chunk.quarter}) but is benched in ${other.id}.`);
+                    }
+                });
+            });
+            return problems;
+        }
+
         function buildPipelinePayload() {
             const remainingTimeTotal = parseInt(document.getElementById('remaining-time').value) || 48;
             const chunks = generateRemainingChunks(remainingTimeTotal);
             
             let constraints = [];
+            let benched = [];
             let errors = [];
             let constraintMap = {};
 
@@ -1203,8 +1337,21 @@
             }
 
             manualConstraints.forEach(mc => {
+                if (mc.position === BENCH_VALUE) {
+                    const attending = playerStates.find(p => p.id === mc.playerId)?.attending;
+                    if (!attending) return;   // absent players are never on the field anyway
+                    const alreadyPlaced = constraints.some(c => c.chunkId === mc.chunkId && c.playerId === mc.playerId)
+                        || benched.some(b => b.chunkId === mc.chunkId && b.playerId === mc.playerId);
+                    if (alreadyPlaced) {
+                        errors.push({ type: 'CONFLICT_DROPPED', message: `Bench constraint dropped: ${mc.playerId} already has a constraint in chunk ${mc.chunkId}.` });
+                    } else {
+                        benched.push({ playerId: mc.playerId, chunkId: mc.chunkId, source: 'manual' });
+                    }
+                    return;
+                }
                 const key = `${mc.chunkId}_${mc.position}`;
-                let playerAlreadyAssignedInChunk = constraints.some(c => c.chunkId === mc.chunkId && c.playerId === mc.playerId);
+                let playerAlreadyAssignedInChunk = constraints.some(c => c.chunkId === mc.chunkId && c.playerId === mc.playerId)
+                    || benched.some(b => b.chunkId === mc.chunkId && b.playerId === mc.playerId);
                 let playerIsAttending = playerStates.find(p => p.id === mc.playerId)?.attending;
 
                 if (!constraintMap[key] && !playerAlreadyAssignedInChunk && playerIsAttending) {
@@ -1239,6 +1386,7 @@
                     isPartial: !!ch.isPartial
                 })),
                 constraints: constraints,
+                benched: benched,
                 errors: errors
             };
         }
@@ -1295,7 +1443,7 @@
                 const slotsToFill = totalFieldSlots - playersPlayingInChunk.size;
 
                 for (let i = 0; i < slotsToFill; i++) {
-                    const eligiblePlayers = payload.roster.filter(p => !playersPlayingInChunk.has(p.id));
+                    const eligiblePlayers = payload.roster.filter(p => !playersPlayingInChunk.has(p.id) && !isBenchedIn(payload, p.id, chunk.id));
                     if (eligiblePlayers.length === 0) break;
                     eligiblePlayers.sort((a, b) => {
                         const minA = totalMinutesMap[a.id] || 0;
@@ -1402,13 +1550,20 @@
             const freeCap = chunks.map((c, j) => Math.max(0, 6 - forbidden[j].size));
             const freeBlocks = freeCap.reduce((a, b) => a + b, 0);
 
+            // Benched players use no slot but can't be given a block in that chunk (a forced slot wins a clash)
+            const unavailable = chunks.map((c, j) => {
+                const set = new Set(forbidden[j]);
+                (payload.benched || []).forEach(b => { if (b.chunkId === c.id) set.add(b.playerId); });
+                return set;
+            });
+
             const avgDur = freeBlocks > 0
                 ? chunks.reduce((a, c, j) => a + freeCap[j] * c.duration, 0) / freeBlocks
                 : 0;
 
             const maxFree = {};
             playerIds.forEach(id => {
-                maxFree[id] = chunks.filter((c, j) => !forbidden[j].has(id) && freeCap[j] > 0).length;
+                maxFree[id] = chunks.filter((c, j) => !unavailable[j].has(id) && freeCap[j] > 0).length;
             });
 
             const given = {};
@@ -1426,7 +1581,7 @@
                 let handedOut = false;
                 for (const id of eligible) {
                     given[id]++;
-                    if (canPlaceRemaining(given, freeCap, forbidden, chunkIds, 0, new Set(), playerIds, false)) { handedOut = true; break; }
+                    if (canPlaceRemaining(given, freeCap, unavailable, chunkIds, 0, new Set(), playerIds, false)) { handedOut = true; break; }
                     given[id]--;
                     full.add(id);
                 }
@@ -1434,7 +1589,7 @@
             }
 
             const demand = { ...given };
-            if (!canPlaceRemaining(demand, freeCap, forbidden, chunkIds, 0, new Set(), playerIds)) return null;
+            if (!canPlaceRemaining(demand, freeCap, unavailable, chunkIds, 0, new Set(), playerIds)) return null;
 
             const chunkPlayers = {};
             for (let j = 0; j < N; j++) {
@@ -1442,7 +1597,7 @@
                 const prev = (j > 0 && chunks[j - 1].quarter === chunks[j].quarter) ? new Set(chunkPlayers[chunkIds[j - 1]]) : new Set();
                 let slotsLeft = freeCap[j];
                 const candidates = playerIds
-                    .filter(id => !forbidden[j].has(id) && demand[id] > 0)
+                    .filter(id => !unavailable[j].has(id) && demand[id] > 0)
                     .sort((a, c) => {
                         const pa = prev.has(a) ? 1 : 0, pc = prev.has(c) ? 1 : 0;
                         if (pa !== pc) return pc - pa;
@@ -1453,7 +1608,7 @@
                     if (slotsLeft === 0) break;
                     demand[id]--; freeCap[j]--;
                     inChunk.add(id);
-                    if (canPlaceRemaining(demand, freeCap, forbidden, chunkIds, j, inChunk, playerIds)) {
+                    if (canPlaceRemaining(demand, freeCap, unavailable, chunkIds, j, inChunk, playerIds)) {
                         slotsLeft--;
                     } else {
                         demand[id]++; freeCap[j]++; inChunk.delete(id);
@@ -1530,6 +1685,10 @@
                             excludedPlayerIds.add(c.playerId);
                         }
                     });
+                });
+
+                (payload.benched || []).forEach(b => {
+                    if (qb.chunks.some(ch => ch.id === b.chunkId)) excludedPlayerIds.add(b.playerId);
                 });
 
                 let candidates = payload.roster
@@ -1680,7 +1839,7 @@
             document.getElementById('json-stage1-container').innerText = JSON.stringify(stage1Payload, null, 2);
 
             const ruleBanner = document.getElementById('rule-banner');
-            const ruleProblems = checkPartialChunksFullyAssigned(stage1Payload);
+            const ruleProblems = checkPartialChunksFullyAssigned(stage1Payload).concat(checkBenchRules(stage1Payload));
             if (ruleProblems.length > 0) {
                 ruleBanner.innerHTML = '<div class="font-semibold mb-1">Plan not built</div>' + ruleProblems.map(p => `<div>${p}</div>`).join('');
                 ruleBanner.classList.remove('hidden');
@@ -1727,6 +1886,13 @@
         }
 
         // Boot Init
+        // Suppress the browser's long-press / right-click menu everywhere except text fields and the debug JSON
+        document.addEventListener('contextmenu', (e) => {
+            if (e.target.closest && e.target.closest('input, textarea, select, pre')) return;
+            e.preventDefault();
+        });
+        onCleanTap(document.getElementById('selection-modal'), closeModal, true);   // tap outside the dialog
+        onCleanTap(document.getElementById('modal-close-btn'), closeModal);
         renderRoster();
         renderManualConstraints();
         recalculateAll();
