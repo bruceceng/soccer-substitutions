@@ -668,9 +668,8 @@
                 }
             });
 
-            // Unified helper to assign a role globally across all chunks
             const allocateRole = (role, slotsKey) => {
-                // 1. Prioritize full quarters globally
+                // 1. Prioritize full quarters ONLY for players with 0 minutes in this category
                 let keepGoingPairs = true;
                 while (keepGoingPairs) {
                     keepGoingPairs = false;
@@ -682,12 +681,12 @@
                             const blockDuration = g1.chunk.duration + g2.chunk.duration;
                             const eligiblePlayers = Object.keys(g1.cells)
                                 .filter(id => g1.cells[id].role === null && g2.cells[id].role === null)
-                                .filter(id => stats[id].pending >= blockDuration);
+                                .filter(id => stats[id].pending >= blockDuration)
+                                .filter(id => stats[id][slotsKey] === 0); // Stops forcing full quarters on those who already have time
                                 
                             eligiblePlayers.forEach(id => {
                                 if (!bestCandidate || 
-                                    stats[id][slotsKey] < stats[bestCandidate.id][slotsKey] || 
-                                    (stats[id][slotsKey] === stats[bestCandidate.id][slotsKey] && stats[id].pending > stats[bestCandidate.id].pending)) {
+                                    (stats[id].pending > stats[bestCandidate.id].pending)) {
                                     bestCandidate = { id, pair };
                                 }
                             });
@@ -706,7 +705,7 @@
                     }
                 }
 
-                // 2. Fill remaining individual chunks globally
+                // 2. Fallback to individual chunks globally to balance evenly
                 let keepGoingIndividuals = true;
                 while (keepGoingIndividuals) {
                     keepGoingIndividuals = false;
@@ -906,8 +905,7 @@
             grid = runStage6ConsistencyPass(grid, payload);
 
             return { grid, stats, roster: payload.roster, warnings, json };
-        }
-        function renderPlayerSummaryReport(stage5) {
+        }        function renderPlayerSummaryReport(stage5) {
             let container = document.getElementById('stage5-player-summary');
             if (!container) return;
 
