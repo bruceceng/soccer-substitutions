@@ -248,7 +248,7 @@
                 quarterMap[q].forEach(ch => orderedChunks.push(ch));
             });
 
-            const grid = orderedChunks.map(chunk => {
+            let grid = orderedChunks.map(chunk => {
                 const playerIds = stage4Output.chunkPlayers[chunk.id] || [];
                 const chunkConstraints = constraints.filter(c => c.chunkId === chunk.id);
                 const goalieC = chunkConstraints.find(c => c.position === 'G');
@@ -582,6 +582,9 @@
                 })),
                 warnings
             };
+
+            // Run Stage 6 Left vs. Right Consistency Cleanup Pass
+            grid = runStage6ConsistencyPass(grid, payload);
 
             return { grid, stats, roster: payload.roster, warnings, json };
         }
@@ -1285,6 +1288,76 @@
             });
         }
 
+      // Helper to retrieve player's side ('L' or 'R') from previous chunks for consistency pass
+      function getPlayerPreviousSide(grid, currentChunkIdx, playerId) {
+          for (let i = currentChunkIdx - 1; i >= 0; i--) {
+              const prevCell = grid[i].cells[playerId];
+              if (prevCell && prevCell.position) {
+                  if (prevCell.position.endsWith('_L')) return 'L';
+                  if (prevCell.position.endsWith('_R')) return 'R';
+              }
+          }
+          return null;
+      }
+
+function runStage6ConsistencyPass(grid, payload) {
+    const sideSlots = ['D_L', 'D_R', 'M_L', 'M_R'];
+
+    grid.forEach((g, chunkIdx) => {
+        if (chunkIdx === 0) return;
+        const prevGrid = grid[chunkIdx - 1];
+
+        // Get players active on L/R slots in BOTH the previous chunk and current chunk
+        const activePlayers = Object.keys(g.cells).filter(id => {
+            const cell = g.cells[id];
+            return cell.position && sideSlots.includes(cell.position) && !cell.locked;
+        });
+
+        activePlayers.forEach(playerId => {
+            const currCell = g.cells[playerId];
+            const currPos = currCell.position;
+            const currSide = currPos.endsWith('_L') ? 'L' : 'R';
+            const group = currPos.charAt(0); // 'D' or 'M'
+
+            const prevCell = prevGrid.cells[playerId];
+            
+            // Case A: Player was in the same group (D or M) in the previous chunk
+            if (prevCell && prevCell.position && prevCell.position.startsWith(group)) {
+                const prevPos = prevCell.position;
+                const prevSide = prevPos.endsWith('_L') ? 'L' : 'R';
+
+                // If they flipped sides between consecutive chunks (e.g., M_L to M_R like Vivian)
+                // Let's check if we can swap them in the current chunk to keep their side consistent
+                if (prevSide !== currSide) {
+                    // Check if swapping back to their previous side improves consistency
+                    const desiredPos = `${group}_${prevSide}`;
+                    
+                    const partnerId = activePlayers.find(otherId => {
+                        if (otherId === playerId) return false;
+                        const otherCell = g.cells[otherId];
+                        if (otherCell.position !== desiredPos || otherCell.locked) return false;
+
+                        // Check what the partner's previous position was
+                        const otherPrevCell = prevGrid.cells[otherId];
+                        const otherPrevSide = (otherPrevCell && otherPrevCell.position) ? 
+                            (otherPrevCell.position.endsWith('_L') ? 'L' : 'R') : null;
+
+                        // Only swap if partner isn't also being forced into a bad flip
+                        return otherPrevSide !== prevSide;
+                    });
+
+                    if (partnerId) {
+                        // Execute the swap to keep Vivian (and partner) side-consistent across chunks
+                        g.cells[playerId].position = desiredPos;
+                        g.cells[partnerId].position = currPos;
+                    }
+                }
+            }
+        });
+    });
+
+    return grid;
+}
         function recalculateAll() {
             const remainingTime = parseInt(document.getElementById('remaining-time').value) || 48;
             const chunks = generateRemainingChunks(remainingTime);
