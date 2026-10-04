@@ -1392,34 +1392,49 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
         if (fieldMins === 0) warnings.push(`${p.name}: no field time projected.`);
     });
 
-    // PASS 6A: Defense sub-position optimization.
+// PASS 6A: Defense sub-position optimization.
     const defenseSlots = ['D_L', 'D_R'];
     grid.forEach(g => {
-        const dPlayerIds = Object.keys(g.cells).filter(id => g.cells[id].role === 'D' && !g.cells[id].locked);
-        if (dPlayerIds.length === 2) {
-            // Preserve the physical defense assignment order when left/right skill is tied:
-            // automatic slot 1 maps to D_L and automatic slot 2 maps to D_R.
-            // This makes the console's FULL_Q_1 / FULL_Q_2 logic correspond to the displayed sides.
-            const ordered = dPlayerIds.slice().sort((a, b) => {
-                const sa = g.cells[a].defenseSlotNumber ?? 99;
-                const sb = g.cells[b].defenseSlotNumber ?? 99;
-                if (sa !== sb) return sa - sb;
-                return (rosterOrder[a] ?? 9999) - (rosterOrder[b] ?? 9999);
-            });
+        // 1. Find all players assigned to defense (locked or unlocked)
+        const allDefenseIds = Object.keys(g.cells).filter(id => g.cells[id].role === 'D' || g.cells[id].position?.startsWith('D_'));
+        
+        // 2. Determine which slots are already taken by locked/pre-positioned players
+        const takenSlots = allDefenseIds
+            .map(id => g.cells[id].position)
+            .filter(pos => pos);
+        
+        // 3. Available slots are those not yet taken
+        const availableSlots = defenseSlots.filter(slot => !takenSlots.includes(slot));
+        
+        // 4. Find unlocked defense players that still need a sub-position
+        const dPlayerIds = Object.keys(g.cells).filter(id => g.cells[id].role === 'D' && !g.cells[id].locked && !g.cells[id].position);
+        
+        // 5. Sort unlocked defenders to preserve physical slot assignment rules
+        const ordered = dPlayerIds.slice().sort((a, b) => {
+            const sa = g.cells[a].defenseSlotNumber ?? 99;
+            const sb = g.cells[b].defenseSlotNumber ?? 99;
+            if (sa !== sb) return sa - sb;
+            return (rosterOrder[a] ?? 9999) - (rosterOrder[b] ?? 9999);
+        });
 
-            ordered.forEach((playerId, index) => {
-                const finalSubPos = defenseSlots[index];
-                g.cells[playerId] = {
-                    role: 'D_SUB',
-                    locked: false,
-                    position: finalSubPos,
-                    defenseSlotNumber: g.cells[playerId].defenseSlotNumber ?? (index + 1)
-                };
-            });
-        }
+        // 6. Assign the remaining available slots to the unlocked players
+        ordered.forEach((playerId, index) => {
+            const finalSubPos = availableSlots[index] || 'D_L'; // Fallback if over-allocated
+            g.cells[playerId] = {
+                ...g.cells[playerId],
+                role: 'D_SUB',
+                position: finalSubPos,
+                defenseSlotNumber: g.cells[playerId].defenseSlotNumber ?? (index + 1)
+            };
+        });
+
+        // 7. Catch-all cleanup to ensure role strings are updated and no one is left null
         Object.keys(g.cells).forEach(id => {
             if (g.cells[id].role === 'D') {
-                if (!g.cells[id].position) g.cells[id].position = 'D_L';
+                if (!g.cells[id].position) {
+                    const taken = Object.keys(g.cells).filter(k => k !== id).map(k => g.cells[k].position);
+                    g.cells[id].position = defenseSlots.find(s => !taken.includes(s)) || 'D_L';
+                }
                 g.cells[id].role = 'D_SUB';
             }
         });
@@ -1428,8 +1443,31 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
     // PASS 6B: Offense sub-position optimization.
     const offensiveSlots = ['M_L', 'M_R', 'F'];
     grid.forEach(g => {
-        const oPlayerIds = Object.keys(g.cells).filter(id => g.cells[id].role === 'O' && !g.cells[id].locked);
-        if (oPlayerIds.length === 3) {
+        // 1. Identify all players in an offensive role (O or F_ROLE)
+        const allOffenseIds = Object.keys(g.cells).filter(id => 
+            g.cells[id].role === 'O' || g.cells[id].role === 'F_ROLE' || 
+            offensiveSlots.includes(g.cells[id].position)
+        );
+
+        // 2. Determine which slots are already taken by locked/pre-positioned players
+        const takenSlots = allOffenseIds
+            .map(id => g.cells[id].position)
+            .filter(pos => pos);
+
+        // 3. Determine remaining available slots
+        let availableSlots = [...offensiveSlots];
+        takenSlots.forEach(taken => {
+            const idx = availableSlots.indexOf(taken);
+            if (idx !== -1) availableSlots.splice(idx, 1);
+        });
+
+        // 4. Find unlocked offensive players that still need a position
+        const oPlayerIds = Object.keys(g.cells).filter(id => 
+            g.cells[id].role === 'O' && !g.cells[id].locked && !g.cells[id].position
+        );
+
+        // 5. Permute the best assignments for the remaining unlocked players
+        if (oPlayerIds.length > 0 && availableSlots.length > 0) {
             const permute = (arr) => {
                 if (arr.length <= 1) return [arr];
                 return arr.reduce((acc, item, i) => {
@@ -1437,9 +1475,16 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
                     return acc.concat(permute(rest).map(p => [item, ...p]));
                 }, []);
             };
-            const slotPermutations = Array.from(new Set(permute(offensiveSlots).map(JSON.stringify))).map(JSON.parse);
+            
+            // Ensure we have enough slots for permutation padding (failsafe)
+            while(availableSlots.length < oPlayerIds.length) availableSlots.push('M_L');
+            
+            const slotsToPermute = availableSlots.slice(0, oPlayerIds.length);
+            const slotPermutations = Array.from(new Set(permute(slotsToPermute).map(JSON.stringify))).map(JSON.parse);
+            
             let bestScore = -Infinity;
-            let bestAssignment = offensiveSlots;
+            let bestAssignment = slotsToPermute;
+            
             slotPermutations.forEach(slotAssignment => {
                 let currentScore = 0;
                 oPlayerIds.forEach((playerId, index) => {
@@ -1451,16 +1496,20 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
                     bestAssignment = slotAssignment;
                 }
             });
+            
             oPlayerIds.forEach((playerId, index) => {
-                const finalSubPos = bestAssignment[index];
-                const roleGroup = finalSubPos === 'F' ? 'F_ROLE' : 'O';
-                g.cells[playerId] = { role: roleGroup, locked: false, position: finalSubPos };
+                g.cells[playerId].position = bestAssignment[index];
             });
         }
+
+        // 6. Cleanup and apply final role tags
         Object.keys(g.cells).forEach(id => {
-            if (g.cells[id].role === 'O') {
-                if (!g.cells[id].position) g.cells[id].position = 'M_L';
-                if (g.cells[id].position === 'F') g.cells[id].role = 'F_ROLE';
+            if (g.cells[id].role === 'O' || g.cells[id].role === 'F_ROLE') {
+                if (!g.cells[id].position) {
+                    const taken = Object.keys(g.cells).filter(k => k !== id).map(k => g.cells[k].position);
+                    g.cells[id].position = offensiveSlots.find(s => !taken.includes(s)) || 'M_L';
+                }
+                g.cells[id].role = g.cells[id].position === 'F' ? 'F_ROLE' : 'O';
             }
         });
     });
