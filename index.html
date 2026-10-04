@@ -2197,7 +2197,11 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
             return fallback;
         }
 
-        function allocateGoalies(payload, stage2Output) {
+function allocateGoalies(payload, stage2Output) {
+            const MAX_AUTO_GOALIE_MINUTES = 24;
+            const ONE_QUARTER_MINUTES = 12;
+            const warnings = [];
+
             let quartersMap = {};
             payload.remainingChunks.forEach(chunk => {
                 if (!quartersMap[chunk.quarter]) {
@@ -2207,11 +2211,20 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
                 quartersMap[chunk.quarter].chunks.push(chunk);
             });
 
-            let quarterBlocks = Object.values(quartersMap);
+            let quarterBlocks = Object.values(quartersMap).sort((a, b) => a.quarter - b.quarter);
             let goalieAssignments = {};
             let goalieMinutesMap = {};
-            payload.roster.forEach(p => { goalieMinutesMap[p.id] = p.priorMinutes.G || 0; });
 
+            const rosterById = Object.fromEntries(payload.roster.map(p => [p.id, p]));
+            const canonicalById = Object.fromEntries(timbresRoster.map((p, index) => [p.id, { ...p, rosterIndex: index }]));
+
+            payload.roster.forEach(p => {
+                goalieMinutesMap[p.id] = p.priorMinutes.G || 0;
+            });
+
+            // Explicit/persisted goalie constraints are already part of the plan and count toward
+            // the goalie-minute history used by the automatic selector. Do not add them again when
+            // the constrained quarter is actually assigned below.
             payload.constraints.forEach(c => {
                 if (c.position === 'G') {
                     const chunkObj = payload.remainingChunks.find(ch => ch.id === c.chunkId);
@@ -2221,88 +2234,230 @@ function allocatePositionCategories(stage4Output, payload, chunks, constraints) 
                 }
             });
 
+            const getGoalieScore = (player) => {
+                const canonical = canonicalById[player.id];
+                if (player.gkScore !== undefined) return player.gkScore;
+                if (canonical && canonical.gkScore !== undefined) return canonical.gkScore;
+                return 0;
+            };
+
+            const getRosterIndex = (playerId) => {
+                const canonical = canonicalById[playerId];
+                if (canonical) return canonical.rosterIndex;
+                return payload.roster.findIndex(p => p.id === playerId);
+            };
+
+            const compactForLog = (candidate) => ({
+                id: candidate.player.id,
+                name: candidate.player.name,
+                goalieMinutes: candidate.goalieMinutes,
+                requiredFutureMinutes: candidate.requiredFutureMinutes,
+                willing: candidate.willing,
+                refuses: !candidate.willing,
+                alreadyOneQuarter: candidate.alreadyOneQuarter,
+                gkScore: candidate.gkScore,
+                rosterIndex: candidate.rosterIndex,
+                priorTotalMinutes: candidate.priorTotalMinutes,
+                currentTotalMinutes: candidate.currentTotalMinutes,
+                targetTotalMinutes: candidate.targetTotalMinutes,
+                minutesOverTarget: candidate.minutesOverTarget,
+                rankTuple: candidate.rankTuple
+            });
+
+            console.log('[Stage3][Goalie] START ' + JSON.stringify({
+                maxAutoGoalieMinutes: MAX_AUTO_GOALIE_MINUTES,
+                oneQuarterMinutes: ONE_QUARTER_MINUTES,
+                quarters: quarterBlocks.map(q => ({
+                    quarter: q.quarter,
+                    duration: q.duration,
+                    chunks: q.chunks.map(c => c.id)
+                }))
+            }, null, 2));
+
             quarterBlocks.forEach(qb => {
+                // 6) Explicit goalie constraints override everything, including the automatic 24-minute cap.
                 let constrainedPlayerId = null;
                 qb.chunks.forEach(chunk => {
                     const constraint = payload.constraints.find(c => c.chunkId === chunk.id && c.position === 'G');
-                    if (constraint) { constrainedPlayerId = constraint.playerId; }
+                    if (constraint) constrainedPlayerId = constraint.playerId;
                 });
 
                 if (constrainedPlayerId) {
                     goalieAssignments[qb.quarter] = constrainedPlayerId;
+                    console.log('[Stage3][Goalie][FORCED] ' + JSON.stringify({
+                        quarter: qb.quarter,
+                        playerId: constrainedPlayerId,
+                        name: rosterById[constrainedPlayerId]?.name || constrainedPlayerId,
+                        goalieMinutesAlreadyCounted: goalieMinutesMap[constrainedPlayerId] || 0,
+                        override: 'explicit goalie constraint'
+                    }, null, 2));
                     return;
                 }
 
-                let excludedPlayerIds = new Set();
+                // Hard exclusions: absent players, players forced to another position, or explicit benches
+                // in either half of this quarter cannot be automatic goalies.
+                const excludedPlayerIds = new Set();
                 qb.chunks.forEach(chunk => {
                     payload.constraints.forEach(c => {
                         if (c.chunkId === chunk.id && c.position !== 'G') {
                             excludedPlayerIds.add(c.playerId);
                         }
                     });
-                });
-
-                (payload.benched || []).forEach(b => {
-                    if (qb.chunks.some(ch => ch.id === b.chunkId)) excludedPlayerIds.add(b.playerId);
-                });
-
-                let candidates = payload.roster
-                    .filter(p => !excludedPlayerIds.has(p.id))
-                    .map(p => {
-                        const futureMins = stage2Output.requiredFutureMinutes[p.id] || 0;
-                        const totalGoalieMins = goalieMinutesMap[p.id] || 0;
-                        const isWilling = p.goaliePref !== 'refuses';
-
-                        let eligibilityTier = 3;
-                        if (isWilling && totalGoalieMins < 24 && futureMins >= 12) {
-                            eligibilityTier = 0;
-                        } else if (isWilling && totalGoalieMins < 24 && futureMins < 12) {
-                            eligibilityTier = 1;
-                        } else if (!isWilling && totalGoalieMins < 24) {
-                            eligibilityTier = 2;
-                        }
-
-                        let skillScore = p.goaliePref === 'preferred' ? 0 : 1;
-
-                        return {
-                            player: p,
-                            tuple: [
-                                eligibilityTier,
-                                totalGoalieMins,
-                                skillScore,
-                                p.id
-                            ]
-                        };
+                    (payload.benched || []).forEach(b => {
+                        if (b.chunkId === chunk.id) excludedPlayerIds.add(b.playerId);
                     });
+                });
 
-                if (candidates.length === 0) {
-                    candidates = payload.roster.map(p => ({
+                const candidates = [];
+                const excludedDiagnostics = [];
+
+                payload.roster.forEach((p) => {
+                    const goalieMinutes = goalieMinutesMap[p.id] || 0;
+                    
+                    // NEW/FIXED LOGIC: Pull current totals early to subtract from required future minutes dynamically.
+                    const priorTotalMinutes = Object.values(p.priorMinutes || {})
+                        .reduce((sum, value) => sum + (Number(value) || 0), 0);
+                    const priorGoalieMinutes = Number(p.priorMinutes?.G) || 0;
+                    const futureGoalieMinutesAlreadyAssigned = Math.max(0, goalieMinutes - priorGoalieMinutes);
+                    
+                    const baseRequiredFutureMinutes = stage2Output.requiredFutureMinutes[p.id] || 0;
+                    const currentRequiredFutureMinutes = baseRequiredFutureMinutes - futureGoalieMinutesAlreadyAssigned;
+
+                    const willing = p.goaliePref !== 'refuses';
+                    const alreadyOneQuarter = goalieMinutes >= ONE_QUARTER_MINUTES;
+                    const rosterIndex = getRosterIndex(p.id);
+                    const gkScore = getGoalieScore(p);
+
+                    const exclusionReasons = [];
+                    if (excludedPlayerIds.has(p.id)) exclusionReasons.push('forced-other-position-or-benched');
+                    if (goalieMinutes >= MAX_AUTO_GOALIE_MINUTES) exclusionReasons.push('goalie-cap-reached');
+
+                    if (exclusionReasons.length > 0) {
+                        excludedDiagnostics.push({
+                            id: p.id,
+                            name: p.name,
+                            goalieMinutes,
+                            requiredFutureMinutes: currentRequiredFutureMinutes,
+                            willing,
+                            gkScore,
+                            reasons: exclusionReasons
+                        });
+                        return;
+                    }
+
+                    // Ranking order exactly follows the requested priorities:
+                    // 2) refusal penalty, 3) no future-minute availability, 4) already one quarter,
+                    // 5) skill. Lower tuple values are better except skill, where higher is better.
+                    const refusesPenalty = willing ? 0 : 1;
+                    
+                    // Evaluate penalty based on the UPDATED required minutes tracking
+                    const noFuturePenalty = currentRequiredFutureMinutes <= 0 ? 1 : 0;
+
+                    const currentTotalMinutes = priorTotalMinutes + futureGoalieMinutesAlreadyAssigned;
+                    const targetTotalMinutes = payload.roster.length > 0
+                        ? payload.roster.reduce((sum, rp) => {
+                            const totals = stage2Output.totalCumulativeMinutes?.[rp.id];
+                            if (totals !== undefined) return sum + totals;
+                            return sum + Object.values(rp.priorMinutes || {})
+                                .reduce((inner, value) => inner + (Number(value) || 0), 0)
+                                + (stage2Output.requiredFutureMinutes[rp.id] || 0);
+                        }, 0) / payload.roster.length
+                        : 0;
+                    const minutesOverTarget = currentTotalMinutes - targetTotalMinutes;
+                    
+                    // 3b) Tiebreaker based on the UPDATED required minutes tracking
+                    const noFutureOverageTieBreak = currentRequiredFutureMinutes <= 0
+                        ? minutesOverTarget
+                        : 0;
+
+                    const alreadyOneQuarterPenalty = alreadyOneQuarter ? 1 : 0;
+
+                    candidates.push({
                         player: p,
-                        tuple: [3, goalieMinutesMap[p.id] || 0, 1, p.id]
-                    }));
-                }
+                        goalieMinutes,
+                        requiredFutureMinutes: currentRequiredFutureMinutes,
+                        willing,
+                        alreadyOneQuarter,
+                        gkScore,
+                        rosterIndex,
+                        priorTotalMinutes,
+                        currentTotalMinutes,
+                        targetTotalMinutes,
+                        minutesOverTarget,
+                        rankTuple: [
+                            refusesPenalty,
+                            noFuturePenalty,
+                            noFuturePenalty ? noFutureOverageTieBreak : 0, // Applies penalty tiebreak
+                            alreadyOneQuarterPenalty,
+                            -gkScore,
+                            goalieMinutes,
+                            rosterIndex
+                        ]
+                    });
+                });
 
                 candidates.sort((a, b) => {
-                    for (let i = 0; i < a.tuple.length; i++) {
-                        if (a.tuple[i] < b.tuple[i]) return -1;
-                        if (a.tuple[i] > b.tuple[i]) return 1;
+                    for (let i = 0; i < a.rankTuple.length; i++) {
+                        if (a.rankTuple[i] < b.rankTuple[i]) return -1;
+                        if (a.rankTuple[i] > b.rankTuple[i]) return 1;
                     }
                     return 0;
                 });
 
-                const selectedGoalie = candidates[0].player;
-                goalieAssignments[qb.quarter] = selectedGoalie.id;
-                goalieMinutesMap[selectedGoalie.id] = (goalieMinutesMap[selectedGoalie.id] || 0) + qb.duration;
+                const logRecord = {
+                    quarter: qb.quarter,
+                    duration: qb.duration,
+                    rankingRules: [
+                        '1: goalie cap / hard eligibility',
+                        '2: refusal penalty',
+                        '3: future-minute availability penalty',
+                        '3b: among no-future players, highest current overage loses before rules 4/5',
+                        '4: already one 12-minute goalie quarter',
+                        '5: goalie skill'
+                    ],
+                    excluded: excludedDiagnostics,
+                    candidates: candidates.map(compactForLog)
+                };
+
+                console.log('[Stage3][Goalie][RANKED] ' + JSON.stringify(logRecord, null, 2));
+
+                if (candidates.length === 0) {
+                    const message = `Q${qb.quarter}: no legal automatic goalie candidate remains below the ${MAX_AUTO_GOALIE_MINUTES}-minute goalie cap.`;
+                    warnings.push(message);
+                    console.warn('[Stage3][Goalie][NO LEGAL CANDIDATE] ' + JSON.stringify({
+                        quarter: qb.quarter,
+                        warning: message,
+                        excluded: excludedDiagnostics
+                    }, null, 2));
+                    return;
+                }
+
+                const selected = candidates[0];
+                goalieAssignments[qb.quarter] = selected.player.id;
+                goalieMinutesMap[selected.player.id] = (goalieMinutesMap[selected.player.id] || 0) + qb.duration;
+
+                console.log('[Stage3][Goalie][SELECTED] ' + JSON.stringify({
+                    quarter: qb.quarter,
+                    selected: compactForLog(selected),
+                    goalieMinutesAfter: goalieMinutesMap[selected.player.id]
+                }, null, 2));
             });
+
+            console.log('[Stage3][Goalie] COMPLETE ' + JSON.stringify({
+                goalieAssignments,
+                totalGoalieMinutes: goalieMinutesMap,
+                warnings
+            }, null, 2));
 
             return {
                 metadata: payload.metadata,
-                goalieAssignments: goalieAssignments,
+                goalieAssignments,
                 totalGoalieMinutes: goalieMinutesMap,
-                errors: payload.errors
+                errors: payload.errors,
+                warnings
             };
         }
-
+        
         function renderChunks(chunks) {
             const container = document.getElementById('chunks-container');
             container.innerHTML = '';
